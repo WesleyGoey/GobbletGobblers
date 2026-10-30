@@ -30,3 +30,50 @@ class Piece(NamedTuple):
     def __str__(self) -> str:
         color = "B" if self.player == PLAYER_BLUE else "O"
         return f"{color}{SIZE_SYMBOLS[self.size]}"
+
+    
+class GameState:
+    """Full representation of a 5x5 Gobblet Gobblers game state."""
+
+    def __init__(self, win_streak: int = 5):
+        self.win_streak: int = win_streak
+
+        # 5x5 board, each cell is a LIFO list of Piece objects.
+        # Bottom piece at index 0, top piece at index -1.
+        self.board: List[List[List[Piece]]] = [[[] for _ in range(5)] for _ in range(5)]
+
+        # Reserves: 4 Large (3), 4 Medium (2), 4 Small (1) per player
+        self.reserves: Dict[int, Dict[int, int]] = {
+            PLAYER_BLUE: {1: 4, 2: 4, 3: 4},
+            PLAYER_ORANGE: {1: 4, 2: 4, 3: 4}
+        }
+
+        self.current_player: int = PLAYER_BLUE
+        self.turn_number: int = 1
+        self.winner: Optional[int] = None
+        self.game_over: bool = False
+        self.win_reason: str = ""
+        self.winning_line: Optional[List[Tuple[int, int]]] = None
+
+        # Move history: list of tuples (turn_number, Move, description)
+        self.move_history: List[Tuple[int, Move, str]] = []
+
+        # Tracks at what turn each piece in each cell stack was covered (None if top/uncovered)
+        self.covered_turns: List[List[List[Optional[int]]]] = [[[] for _ in range(5)] for _ in range(5)]
+
+    def get_top_piece(self, r: int, c: int) -> Optional[Piece]:
+        cell = self.board[r][c]
+        return cell[-1] if cell else None
+
+    def get_top_size(self, r: int, c: int) -> int:
+        piece = self.get_top_piece(r, c)
+        return piece.size if piece else 0
+
+    def get_stack_depth(self, r: int, c: int) -> int:
+        return len(self.board[r][c])
+
+    def get_cell_stack(self, r: int, c: int) -> List[Piece]:
+        return list(self.board[r][c])
+
+    def get_cell_covered_turns(self, r: int, c: int) -> List[Optional[int]]:
+        return list(self.covered_turns[r][c])
