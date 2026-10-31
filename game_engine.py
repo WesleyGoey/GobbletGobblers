@@ -133,6 +133,7 @@ class GameState:
 
         # Tracks at what turn each piece in each cell stack was covered (None if top/uncovered)
         self.covered_turns: List[List[List[Optional[int]]]] = [[[] for _ in range(5)] for _ in range(5)]
+        self.winning_lines: List[List[Tuple[int, int]]] = generate_winning_lines(win_streak)
 
     def get_top_piece(self, r: int, c: int) -> Optional[Piece]:
         cell = self.board[r][c]
@@ -168,3 +169,78 @@ class GameState:
             if match:
                 wins[p].append(line)
         return wins
+
+    def check_winner_on_board(self) -> Tuple[Optional[int], Optional[List[Tuple[int, int]]]]:
+        """Check visible pieces on board for winning lines."""
+        wins = self.find_all_winning_lines()
+        blue_wins = wins[PLAYER_BLUE]
+        orange_wins = wins[PLAYER_ORANGE]
+
+        if blue_wins and not orange_wins:
+            return PLAYER_BLUE, blue_wins[0]
+        if orange_wins and not blue_wins:
+            return PLAYER_ORANGE, orange_wins[0]
+        if blue_wins and orange_wins:
+            opp = PLAYER_ORANGE if self.current_player == PLAYER_BLUE else PLAYER_BLUE
+            return opp, wins[opp][0]
+        return None, None
+
+    def apply_move(self, move: Move) -> bool:
+        """Execute a move on the game state. Updates board, reserves, win detection, and turn count."""
+        if self.game_over or move.player != self.current_player:
+            return False
+
+        player = move.player
+        opponent = PLAYER_ORANGE if player == PLAYER_BLUE else PLAYER_BLUE
+
+        if move.move_type == 'drop':
+            size = move.size
+            if self.reserves[player][size] <= 0:
+                return False
+            r, c = move.to_pos
+            if self.get_top_size(r, c) >= size:
+                return False
+
+            self.reserves[player][size] -= 1
+            piece = Piece(player, size)
+            if self.board[r][c]:
+                move.covered_piece = self.board[r][c][-1]
+                if self.covered_turns[r][c]:
+                    self.covered_turns[r][c][-1] = self.turn_number
+            self.board[r][c].append(piece)
+            self.covered_turns[r][c].append(None)
+
+        elif move.move_type == 'move':
+            r1, c1 = move.from_pos
+            r2, c2 = move.to_pos
+            if (r1, c1) == (r2, c2):
+                return False
+            top1 = self.get_top_piece(r1, c1)
+            if not top1 or top1.player != player or self.get_top_size(r2, c2) >= top1.size:
+                return False
+
+            piece = self.board[r1][c1].pop()
+            self.covered_turns[r1][c1].pop()
+            if self.board[r1][c1]:
+                move.uncovered_piece = self.board[r1][c1][-1]
+                self.covered_turns[r1][c1][-1] = None
+
+            if self.board[r2][c2]:
+                move.covered_piece = self.board[r2][c2][-1]
+                if self.covered_turns[r2][c2]:
+                    self.covered_turns[r2][c2][-1] = self.turn_number
+            self.board[r2][c2].append(piece)
+            self.covered_turns[r2][c2].append(None)
+
+        # Cek kondisi menang
+        winner, win_line = self.check_winner_on_board()
+        if winner:
+            self.winner = winner
+            self.game_over = True
+            self.winning_line = win_line
+            self.win_reason = f"{PLAYER_NAMES[winner]} forms {self.win_streak}-in-a-row!"
+
+        self.move_history.append((self.turn_number, move, str(move)))
+        self.current_player = opponent
+        self.turn_number += 1
+        return True
