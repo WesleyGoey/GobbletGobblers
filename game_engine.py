@@ -168,3 +168,53 @@ class GameState:
             if match:
                 wins[p].append(line)
         return wins
+    def would_lift_uncover_opponent_win(self, from_pos: Tuple[int, int]) -> Tuple[bool, List[List[Tuple[int, int]]]]:
+        """Simulate lifting top piece at from_pos to check if it reveals an opponent winning line."""
+        r, c = from_pos
+        cell = self.board[r][c]
+        if not cell:
+            return False, []
+
+        piece = cell.pop()
+        opponent = PLAYER_ORANGE if piece.player == PLAYER_BLUE else PLAYER_BLUE
+        opp_lines = []
+
+        for line in self.winning_lines:
+            if (r, c) in line:
+                colors = [self.get_top_piece(lr, lc).player for lr, lc in line if self.get_top_piece(lr, lc) and self.get_top_piece(lr, lc).player == opponent]
+                if len(colors) == self.win_streak:
+                    opp_lines.append(line)
+
+        cell.append(piece)  # Restore
+        return (len(opp_lines) > 0), opp_lines
+
+    def get_legal_moves(self, player: Optional[int] = None) -> List[Move]:
+        """Returns all legal moves including drops and board repositioning with uncover trap compliance."""
+        if self.game_over:
+            return []
+        if player is None:
+            player = self.current_player
+
+        legal_moves: List[Move] = []
+        # 1. Action A: Reserve drops
+        reserve = self.reserves[player]
+        for size in [3, 2, 1]:
+            if reserve[size] > 0:
+                for r in range(5):
+                    for c in range(5):
+                        if self.get_top_size(r, c) < size:
+                            legal_moves.append(Move(player=player, move_type='drop', size=size, to_pos=(r, c)))
+
+        # 2. Action B: Move piece on board
+        for r1 in range(5):
+            for c1 in range(5):
+                top_piece = self.get_top_piece(r1, c1)
+                if top_piece and top_piece.player == player:
+                    size = top_piece.size
+                    for r2 in range(5):
+                        for c2 in range(5):
+                            if (r1, c1) != (r2, c2) and self.get_top_size(r2, c2) < size:
+                                legal_moves.append(Move(player=player, move_type='move', size=size, from_pos=(r1, c1), to_pos=(r2, c2)))
+
+        return legal_moves
+
