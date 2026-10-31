@@ -78,7 +78,33 @@ class Move:
     def __hash__(self) -> int:
         return hash((self.player, self.move_type, self.to_pos, self.size, self.from_pos))
 
-    
+def generate_winning_lines(win_streak: int = 5) -> List[List[Tuple[int, int]]]:
+    """Generate all line segments of length win_streak on a 5x5 board (12 lines for streak=5)."""
+    lines = []
+    # Horizontal lines
+    for r in range(5):
+        for c in range(5 - win_streak + 1):
+            lines.append([(r, c + i) for i in range(win_streak)])
+
+    # Vertical lines
+    for c in range(5):
+        for r in range(5 - win_streak + 1):
+            lines.append([(r + i, c) for i in range(win_streak)])
+
+    # Main diagonals (top-left to bottom-right)
+    for r in range(5 - win_streak + 1):
+        for c in range(5 - win_streak + 1):
+            lines.append([(r + i, c + i) for i in range(win_streak)])
+
+    # Anti-diagonals (top-right to bottom-left)
+    for r in range(5 - win_streak + 1):
+        for c in range(win_streak - 1, 5):
+            lines.append([(r + i, c - i) for i in range(win_streak)])
+
+    return lines
+
+WINNING_LINES_5 = generate_winning_lines(5)
+
 class GameState:
     """Full representation of a 5x5 Gobblet Gobblers game state."""
 
@@ -124,3 +150,21 @@ class GameState:
 
     def get_cell_covered_turns(self, r: int, c: int) -> List[Optional[int]]:
         return list(self.covered_turns[r][c])
+    
+    def find_all_winning_lines(self) -> Dict[int, List[List[Tuple[int, int]]]]:
+        """Finds all winning lines on the board for each player according to self.win_streak."""
+        wins: Dict[int, List[List[Tuple[int, int]]]] = {PLAYER_BLUE: [], PLAYER_ORANGE: []}
+        for line in self.winning_lines:
+            first_piece = self.get_top_piece(line[0][0], line[0][1])
+            if not first_piece:
+                continue
+            p = first_piece.player
+            match = True
+            for r, c in line[1:]:
+                piece = self.get_top_piece(r, c)
+                if not piece or piece.player != p:
+                    match = False
+                    break
+            if match:
+                wins[p].append(line)
+        return wins
