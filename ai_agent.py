@@ -101,6 +101,68 @@ class MinimaxAgent:
                 min_eval = min(min_eval, ev)
             return min_eval
 
+    def order_moves(self, state: GameState, moves: List[Move]) -> List[Move]:
+        """Order moves heuristically so best branches are evaluated first, maximizing cutoffs."""
+        def move_weight(m: Move) -> int:
+            weight = 0
+            r, c = m.to_pos
+            # Center control priority
+            if (r, c) == (2, 2):
+                weight += 50
+            elif (r, c) in {(1, 1), (1, 2), (1, 3), (2, 1), (2, 3), (3, 1), (3, 2), (3, 3)}:
+                weight += 20
+            # Gobbling opponent piece priority
+            top = state.get_top_piece(r, c)
+            if top and top.player != self.player:
+                weight += 40 * top.size
+            # Size priority
+            if m.size:
+                weight += m.size * 5
+            return weight
+
+        return sorted(moves, key=move_weight, reverse=True)
+
+    def _alpha_beta(self, state: GameState, depth: int, alpha: float, beta: float, is_maximizing: bool) -> float:
+        """Minimax with Alpha-Beta Pruning to skip suboptimal search branches."""
+        self.nodes_evaluated += 1
+
+        winner, _ = state.check_winner_on_board()
+        if winner == self.player:
+            return 10000.0 - (self.max_depth - depth)
+        elif winner is not None:
+            return -10000.0 + (self.max_depth - depth)
+        if depth == 0 or state.game_over:
+            return self.evaluate_state(state)
+
+        legal_moves = self.order_moves(state, state.get_legal_moves())
+        if not legal_moves:
+            return 0.0
+
+        if is_maximizing:
+            max_eval = -float('inf')
+            for move in legal_moves:
+                child = state.clone()
+                child.apply_move(move)
+                ev = self._alpha_beta(child, depth - 1, alpha, beta, False)
+                max_eval = max(max_eval, ev)
+                alpha = max(alpha, ev)
+                if beta <= alpha:
+                    self.pruned_branches += 1
+                    break
+            return max_eval
+        else:
+            min_eval = float('inf')
+            for move in legal_moves:
+                child = state.clone()
+                child.apply_move(move)
+                ev = self._alpha_beta(child, depth - 1, alpha, beta, True)
+                min_eval = min(min_eval, ev)
+                beta = min(beta, ev)
+                if beta <= alpha:
+                    self.pruned_branches += 1
+                    break
+            return min_eval
+
     def get_best_move(self, real_state: GameState) -> Optional[Move]:
         """Find and return the optimal move from the current game state."""
         self.reset_telemetry()
@@ -108,21 +170,24 @@ class MinimaxAgent:
 
         # Build belief state based on bounded memory
         state = build_belief_state(real_state, self.memory_window)
-        legal_moves = state.get_legal_moves(self.player)
+        legal_moves = self.order_moves(state, state.get_legal_moves(self.player))
         if not legal_moves:
             return None
 
         best_score = -float('inf')
         best_move = legal_moves[0]
+        alpha = -float('inf')
+        beta = float('inf')
 
         for move in legal_moves:
             child = state.clone()
             child.apply_move(move)
-            score = self._minimax(child, self.max_depth - 1, False)
+            score = self._alpha_beta(child, self.max_depth - 1, alpha, beta, False)
             self.candidate_moves.append({'move': move, 'score': score})
             if score > best_score:
                 best_score = score
                 best_move = move
+            alpha = max(alpha, best_score)
 
         self.last_search_time = time.time() - start_time
         return best_move

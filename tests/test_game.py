@@ -113,5 +113,20 @@ class TestUncoverTrapEdgeCases(unittest.TestCase):
         self.assertEqual(len(lines), 1)
 
 
+class TestAlphaBetaPruning(unittest.TestCase):
+    def test_alpha_beta_pruning_efficiency(self):
+        from ai_agent import MinimaxAgent
+        state = GameState(win_streak=5)
+        # Setup initial board pieces
+        state.apply_move(Move(PLAYER_BLUE, 'drop', to_pos=(2, 2), size=3))
+
+        agent = MinimaxAgent(player=PLAYER_ORANGE, max_depth=2)
+        best_move = agent.get_best_move(state)
+        self.assertIsNotNone(best_move)
+        # Verify pruned branches were triggered and search visited fewer nodes
+        self.assertGreater(agent.pruned_branches, 0)
+        self.assertLess(agent.nodes_evaluated, 75 * 75)
+
+
 if __name__ == '__main__':
     unittest.main()
