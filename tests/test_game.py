@@ -34,3 +34,23 @@ class TestGobbletEngine(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+
+class TestUncoverTrapEdgeCases(unittest.TestCase):
+    def test_uncover_opponent_win_detection(self):
+        state = GameState(win_streak=4)
+        # Setup row 0 with 3 Orange pieces and 1 Blue piece covering an Orange piece
+        state.board[0][0] = [Piece(PLAYER_ORANGE, 2)]
+        state.board[0][1] = [Piece(PLAYER_ORANGE, 2)]
+        state.board[0][2] = [Piece(PLAYER_ORANGE, 2)]
+        # Cell (0, 3) has Orange buried under Blue Large
+        state.board[0][3] = [Piece(PLAYER_ORANGE, 1), Piece(PLAYER_BLUE, 3)]
+
+        # If Blue lifts piece at (0, 3), Orange instantly has 4 in a row!
+        is_trap, lines = state.would_lift_uncover_opponent_win((0, 3))
+        self.assertTrue(is_trap)
+        self.assertEqual(len(lines), 1)
+
+if __name__ == '__main__':
+    unittest.main()
