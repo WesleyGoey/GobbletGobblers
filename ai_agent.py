@@ -167,3 +167,24 @@ class MinimaxAgent:
                     self.pruned_branches += 1
                     break
             return min_eval
+
+def order_moves(self, state: GameState, moves: List[Move]) -> List[Move]:
+        """Order moves heuristically so best branches are evaluated first, maximizing cutoffs."""
+        def move_weight(m: Move) -> int:
+            weight = 0
+            r, c = m.to_pos
+            # Center control priority
+            if (r, c) == (2, 2):
+                weight += 50
+            elif (r, c) in {(1, 1), (1, 2), (1, 3), (2, 1), (2, 3), (3, 1), (3, 2), (3, 3)}:
+                weight += 20
+            # Gobbling opponent piece priority
+            top = state.get_top_piece(r, c)
+            if top and top.player != self.player:
+                weight += 40 * top.size
+            # Size priority
+            if m.size:
+                weight += m.size * 5
+            return weight
+
+        return sorted(moves, key=move_weight, reverse=True)
