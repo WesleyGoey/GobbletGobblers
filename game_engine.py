@@ -244,3 +244,84 @@ class GameState:
         self.current_player = opponent
         self.turn_number += 1
         return True
+
+    def get_opponent(self, player: int) -> int:
+        return PLAYER_ORANGE if player == PLAYER_BLUE else PLAYER_BLUE
+
+    def would_lift_uncover_opponent_win(self, from_pos: Tuple[int, int]) -> Tuple[bool, List[List[Tuple[int, int]]]]:
+        """
+        Simulate lifting the top piece at from_pos.
+        Checks if doing so reveals any opponent winning lines.
+        Returns (is_uncover_trap, list_of_opponent_winning_lines).
+        """
+        r, c = from_pos
+        cell = self.board[r][c]
+        if not cell:
+            return False, []
+
+        piece = cell.pop()
+        opponent = self.get_opponent(piece.player)
+
+        # Check all winning lines that contain (r, c)
+        opp_lines = []
+        for line in self.winning_lines:
+            if (r, c) in line:
+                colors = []
+                for lr, lc in line:
+                    top = self.get_top_piece(lr, lc)
+                    if top and top.player == opponent:
+                        colors.append(top.player)
+                    else:
+                        break
+                if len(colors) == self.win_streak:
+                    opp_lines.append(line)
+
+        cell.append(piece)  # Restore piece
+        return (len(opp_lines) > 0), opp_lines
+
+    def clone(self) -> 'GameState':
+        """Deep copy of the game state for search simulations."""
+        new_state = GameState(win_streak=self.win_streak)
+        new_state.board = [[list(cell) for cell in row] for row in self.board]
+        new_state.covered_turns = [[list(cell) for cell in row] for row in self.covered_turns]
+        new_state.reserves = {
+            p: dict(res) for p, res in self.reserves.items()
+        }
+        new_state.current_player = self.current_player
+        new_state.turn_number = self.turn_number
+        new_state.winner = self.winner
+        new_state.game_over = self.game_over
+        new_state.win_reason = self.win_reason
+        new_state.winning_line = list(self.winning_line) if self.winning_line else None
+        new_state.move_history = list(self.move_history)
+        return new_state
+
+    def get_legal_moves(self, player: Optional[int] = None) -> List[Move]:
+        """Returns all legal moves including drops and board repositioning."""
+        if self.game_over:
+            return []
+        if player is None:
+            player = self.current_player
+
+        legal_moves: List[Move] = []
+        # 1. Action A: Reserve drops
+        reserve = self.reserves[player]
+        for size in [3, 2, 1]:
+            if reserve[size] > 0:
+                for r in range(5):
+                    for c in range(5):
+                        if self.get_top_size(r, c) < size:
+                            legal_moves.append(Move(player=player, move_type='drop', size=size, to_pos=(r, c)))
+
+        # 2. Action B: Move piece on board
+        for r1 in range(5):
+            for c1 in range(5):
+                top_piece = self.get_top_piece(r1, c1)
+                if top_piece and top_piece.player == player:
+                    size = top_piece.size
+                    for r2 in range(5):
+                        for c2 in range(5):
+                            if (r1, c1) != (r2, c2) and self.get_top_size(r2, c2) < size:
+                                legal_moves.append(Move(player=player, move_type='move', size=size, from_pos=(r1, c1), to_pos=(r2, c2)))
+
+        return legal_moves
