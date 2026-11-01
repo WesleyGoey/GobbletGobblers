@@ -191,3 +191,28 @@ class MinimaxAgent:
 
         self.last_search_time = time.time() - start_time
         return best_move
+
+class MemoryInspector:
+    """Tracks and reports what the AI remembers vs what it has forgotten."""
+    @staticmethod
+    def get_memory_snapshot(game_state: GameState, memory_window: int = 5) -> List[Dict[str, Any]]:
+        current_turn = game_state.turn_number
+        records = []
+        for r in range(5):
+            for c in range(5):
+                stack = game_state.get_cell_stack(r, c)
+                if len(stack) > 1:
+                    top_piece = stack[-1]
+                    covered_turns = game_state.get_cell_covered_turns(r, c)
+                    for idx, buried_piece in enumerate(stack[:-1]):
+                        turn_covered = covered_turns[idx] if idx < len(covered_turns) else None
+                        turns_ago = (current_turn - turn_covered) if turn_covered is not None else 999
+                        is_remembered = (turns_ago <= memory_window)
+                        records.append({
+                            'pos': (r, c),
+                            'buried_piece': buried_piece,
+                            'turns_ago': turns_ago,
+                            'is_remembered': is_remembered,
+                            'status': "Remembered" if is_remembered else "Forgotten (UNKNOWN)"
+                        })
+        return records
