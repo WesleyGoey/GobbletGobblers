@@ -192,35 +192,27 @@ class MinimaxAgent:
         self.last_search_time = time.time() - start_time
         return best_move
 
-class AIHeuristic:
-    """Evaluates a board state from the perspective of PLAYER_ORANGE (AI)."""
-
-    @classmethod
-    def evaluate(cls, state: GameState, ai_player: int = PLAYER_ORANGE) -> float:
-        human_player = PLAYER_BLUE if ai_player == PLAYER_ORANGE else PLAYER_ORANGE
-        winner, _ = state.check_winner_on_board()
-        if winner == ai_player:
-            return 10000.0
-        elif winner == human_player:
-            return -10000.0
-
-        score = 0.0
-        for line in state.winning_lines:
-            ai_count = sum(1 for r, c in line if state.get_top_piece(r, c) and state.get_top_piece(r, c).player == ai_player)
-            human_count = sum(1 for r, c in line if state.get_top_piece(r, c) and state.get_top_piece(r, c).player == human_player)
-
-            if human_count == 0 and ai_count > 0:
-                if ai_count >= 4: score += 650.0
-                elif ai_count == 3: score += 150.0
-                elif ai_count == 2: score += 28.0
-            elif ai_count == 0 and human_count > 0:
-                if human_count >= 4: score -= 820.0  # High defense priority
-                elif human_count == 3: score -= 170.0
-                elif human_count == 2: score -= 32.0
-
-        # Center control bonus
-        center = state.get_top_piece(2, 2)
-        if center:
-            score += 35.0 if center.player == ai_player else -35.0
-
-        return score
+class MemoryInspector:
+    """Tracks and reports what the AI remembers vs what it has forgotten."""
+    @staticmethod
+    def get_memory_snapshot(game_state: GameState, memory_window: int = 5) -> List[Dict[str, Any]]:
+        current_turn = game_state.turn_number
+        records = []
+        for r in range(5):
+            for c in range(5):
+                stack = game_state.get_cell_stack(r, c)
+                if len(stack) > 1:
+                    top_piece = stack[-1]
+                    covered_turns = game_state.get_cell_covered_turns(r, c)
+                    for idx, buried_piece in enumerate(stack[:-1]):
+                        turn_covered = covered_turns[idx] if idx < len(covered_turns) else None
+                        turns_ago = (current_turn - turn_covered) if turn_covered is not None else 999
+                        is_remembered = (turns_ago <= memory_window)
+                        records.append({
+                            'pos': (r, c),
+                            'buried_piece': buried_piece,
+                            'turns_ago': turns_ago,
+                            'is_remembered': is_remembered,
+                            'status': "Remembered" if is_remembered else "Forgotten (UNKNOWN)"
+                        })
+        return records
