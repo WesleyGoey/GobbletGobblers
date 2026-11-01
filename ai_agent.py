@@ -17,3 +17,29 @@ class MinimaxAgent:
         self.nodes_evaluated = 0
         self.pruned_branches = 0
         self.candidate_moves.clear()
+
+def get_best_move(self, real_state: GameState) -> Optional[Move]:
+        """Find and return the optimal move from the current game state."""
+        self.reset_telemetry()
+        start_time = time.time()
+
+        # Build belief state based on bounded memory
+        state = build_belief_state(real_state, self.memory_window)
+        legal_moves = state.get_legal_moves(self.player)
+        if not legal_moves:
+            return None
+
+        best_score = -float('inf')
+        best_move = legal_moves[0]
+
+        for move in legal_moves:
+            child = state.clone()
+            child.apply_move(move)
+            score = self._minimax(child, self.max_depth - 1, False)
+            self.candidate_moves.append({'move': move, 'score': score})
+            if score > best_score:
+                best_score = score
+                best_move = move
+
+        self.last_search_time = time.time() - start_time
+        return best_move
