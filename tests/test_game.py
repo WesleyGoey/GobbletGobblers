@@ -128,5 +128,30 @@ class TestAlphaBetaPruning(unittest.TestCase):
         self.assertLess(agent.nodes_evaluated, 75 * 75)
 
 
+class TestBoundedMemory(unittest.TestCase):
+    def test_bounded_memory_forgetting(self):
+        """Test that pieces buried longer than memory_window turns are forgotten in belief state."""
+        from ai_agent import build_belief_state, MemoryInspector
+        state = GameState(win_streak=5)
+        # Drop Blue Small at (0, 0)
+        state.apply_move(Move(PLAYER_BLUE, 'drop', to_pos=(0, 0), size=1))
+        # Orange gobbles with Medium at (0, 0) on turn 2
+        state.apply_move(Move(PLAYER_ORANGE, 'drop', to_pos=(0, 0), size=2))
+
+        # Advance turn number beyond memory_window=5
+        state.turn_number = 10
+        belief = build_belief_state(state, memory_window=5)
+
+        # In real state, depth is 2 (Blue Small buried)
+        self.assertEqual(state.get_stack_depth(0, 0), 2)
+        # In AI belief state, buried piece is forgotten (depth is 1, only top piece known)
+        self.assertEqual(len(belief.board[0][0]), 1)
+        self.assertEqual(belief.board[0][0][0].size, 2)
+
+        # Memory inspector should flag piece as forgotten
+        records = MemoryInspector.get_memory_snapshot(state, memory_window=5)
+        self.assertTrue(any(not r['is_remembered'] for r in records))
+
+
 if __name__ == '__main__':
     unittest.main()

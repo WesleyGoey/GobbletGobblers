@@ -4,32 +4,38 @@ from game_engine import GameState, Move, PLAYER_BLUE, PLAYER_ORANGE
 
 
 def build_belief_state(real_state: GameState, memory_window: int = 5) -> GameState:
-    """
-    Constructs the AI's internal belief state based on its bounded memory.
-    - Top pieces on the board are always visible.
-    - Buried pieces covered within the last memory_window moves are remembered.
-    - Buried pieces covered > memory_window moves ago are forgotten.
-    """
-    belief = real_state.clone()
+    """Constructs the AI's internal belief state based on its bounded memory window."""
+    belief = GameState(win_streak=real_state.win_streak)
     current_turn = real_state.turn_number
 
     for r in range(5):
         for c in range(5):
             real_stack = real_state.get_cell_stack(r, c)
-            if len(real_stack) > 1:
+            if not real_stack:
+                continue
+            top_piece = real_stack[-1]
+            if len(real_stack) == 1:
+                belief.board[r][c] = [top_piece]
+                belief.covered_turns[r][c] = [None]
+            else:
                 covered_turns = real_state.get_cell_covered_turns(r, c)
-                filtered_stack = []
-                filtered_turns = []
-                for idx, piece in enumerate(real_stack[:-1]):
-                    t_cov = covered_turns[idx] if idx < len(covered_turns) else None
-                    if t_cov is not None and (current_turn - t_cov) <= memory_window:
-                        filtered_stack.append(piece)
-                        filtered_turns.append(t_cov)
-                filtered_stack.append(real_stack[-1])
-                filtered_turns.append(None)
-                belief.board[r][c] = filtered_stack
-                belief.covered_turns[r][c] = filtered_turns
+                belief_stack = []
+                belief_covered_turns = []
+                for idx, buried_piece in enumerate(real_stack[:-1]):
+                    turn_covered = covered_turns[idx] if idx < len(covered_turns) else None
+                    turns_ago = (current_turn - turn_covered) if turn_covered is not None else 999
+                    if turns_ago <= memory_window:
+                        belief_stack.append(buried_piece)  # AI remembers
+                        belief_covered_turns.append(turn_covered)
+                    # Otherwise forgotten!
+                belief_stack.append(top_piece)
+                belief_covered_turns.append(None)
+                belief.board[r][c] = belief_stack
+                belief.covered_turns[r][c] = belief_covered_turns
 
+    belief.reserves = {p: dict(res) for p, res in real_state.reserves.items()}
+    belief.current_player = real_state.current_player
+    belief.turn_number = real_state.turn_number
     return belief
 
 
@@ -52,21 +58,8 @@ class MinimaxAgent:
         self.candidate_moves.clear()
 
     def evaluate_state(self, state: GameState) -> float:
-        """Basic heuristic evaluation of board state from the perspective of self.player."""
-        winner, _ = state.check_winner_on_board()
-        if winner == self.player:
-            return 10000.0
-        elif winner is not None:
-            return -10000.0
-
-        score = 0.0
-        for r in range(5):
-            for c in range(5):
-                top = state.get_top_piece(r, c)
-                if top:
-                    val = top.size * 2
-                    score += val if top.player == self.player else -val
-        return score
+        """Heuristic evaluation of board state from the perspective of self.player."""
+        return AIHeuristic.evaluate(state, self.player)
 
     def _minimax(self, state: GameState, depth: int, is_maximizing: bool) -> float:
         """Recursive adversarial minimax traversal over game states."""
