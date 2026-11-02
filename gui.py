@@ -155,3 +155,11 @@ class PygameGUI:
             msg = f"Cell ({r},{c}) | {rec['buried_piece']} | {rec['turns_ago']}t ago -> {tag}"
             self.screen.blit(font_sm.render(msg, True, col), (sb_x, y))
             y += 18
+
+    def restart_game(self, win_streak: int = 5):
+        """Reset the match state to empty board and full 12-piece reserves."""
+        self.state = GameState(win_streak=win_streak)
+        self.selected_reserve_size = None
+        self.selected_board_pos = None
+        self.ai_agent.reset_telemetry()
+        print("Game restarted successfully.")
