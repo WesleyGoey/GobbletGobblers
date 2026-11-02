@@ -83,3 +83,53 @@ class PygameGUI:
             top = self.state.get_top_piece(r, c)
             if top and top.player == self.state.current_player:
                 self.selected_board_pos = (r, c)
+
+    def draw_sidebar_container(self):
+        """Draw the right telemetry dashboard container."""
+        sb_x = 640
+        sb_y = 40
+        sb_w = 600
+        sb_h = 680
+        # Background card
+        rect = pygame.Rect(sb_x, sb_y, sb_w, sb_h)
+        pygame.draw.rect(self.screen, (28, 33, 40), rect, border_radius=12)
+        pygame.draw.rect(self.screen, (55, 65, 80), rect, 2, border_radius=12)
+
+        # Header Title
+        font_title = pygame.font.SysFont("Arial", 20, bold=True)
+        txt = font_title.render("AI TELEMETRY & DECISION HUD", True, (240, 243, 246))
+        self.screen.blit(txt, (sb_x + 20, sb_y + 18))
+
+    def draw_ai_decision_feed(self, ai_agent):
+        """Render real-time search statistics and candidate move scores."""
+        sb_x = 660
+        y = 110
+        font_sm = pygame.font.SysFont("Courier", 13)
+
+        # Search Metrics
+        stats = [
+            f"Nodes Evaluated : {ai_agent.nodes_evaluated:,}",
+            f"Branches Pruned : {ai_agent.pruned_branches:,}",
+            f"Search Time     : {ai_agent.last_search_time*1000:.1f} ms",
+            f"Memory Window   : {ai_agent.memory_window} turns"
+        ]
+        for s in stats:
+            txt = font_sm.render(s, True, (160, 180, 205))
+            self.screen.blit(txt, (sb_x, y))
+            y += 20
+
+        y += 10
+        pygame.draw.line(self.screen, (50, 60, 75), (sb_x, y), (sb_x + 540, y), 1)
+        y += 15
+
+        # Candidate Moves Feed
+        txt_hdr = font_sm.render("TOP EVALUATED CANDIDATE MOVES:", True, (255, 200, 80))
+        self.screen.blit(txt_hdr, (sb_x, y))
+        y += 22
+
+        for cand in ai_agent.candidate_moves[:5]:
+            m = cand['move']
+            sc = cand['score']
+            line = f"-> {str(m):<32} Score: {sc:>7.1f}"
+            self.screen.blit(font_sm.render(line, True, (200, 220, 240)), (sb_x, y))
+            y += 20

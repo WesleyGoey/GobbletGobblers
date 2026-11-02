@@ -172,3 +172,23 @@ class TestGUIFigurineRenderer(unittest.TestCase):
                 gui.draw_piece(surface, 150 * size, 150 * player, player, size)
         self.assertEqual(gui.board_size, 560)
         self.assertEqual(gui.cell_size, 112)
+
+
+class TestGUIDecisionFeed(unittest.TestCase):
+    def test_draw_sidebar_and_decision_feed(self):
+        import pygame
+        pygame.init()
+        from gui import PygameGUI
+        from ai_agent import MinimaxAgent
+        state = GameState(win_streak=5)
+        gui = PygameGUI(state)
+        ai = MinimaxAgent()
+        ai.nodes_evaluated = 250
+        ai.pruned_branches = 80
+        ai.last_search_time = 0.032
+        ai.candidate_moves = [{'move': 'drop(size=3, to=(2,2))', 'score': 200.0}]
+
+        # Verify execution without exception
+        gui.draw_sidebar_container()
+        gui.draw_ai_decision_feed(ai)
+        self.assertGreater(ai.nodes_evaluated, 0)
