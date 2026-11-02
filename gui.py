@@ -133,3 +133,25 @@ class PygameGUI:
             line = f"-> {str(m):<32} Score: {sc:>7.1f}"
             self.screen.blit(font_sm.render(line, True, (200, 220, 240)), (sb_x, y))
             y += 20
+
+    def draw_memory_window_inspector(self, memory_records: list):
+        """Draw memory status badges for buried pieces in the HUD."""
+        sb_x = 660
+        y = 360
+        font_sm = pygame.font.SysFont("Arial", 12)
+        txt_hdr = font_sm.render("AI MEMORY AUDIT (Buried Pieces):", True, (120, 220, 255))
+        self.screen.blit(txt_hdr, (sb_x, y))
+        y += 20
+
+        if not memory_records:
+            self.screen.blit(font_sm.render("No buried pieces on board.", True, (140, 150, 160)), (sb_x, y))
+            return
+
+        for rec in memory_records[:6]:
+            r, c = rec['pos']
+            rem = rec['is_remembered']
+            col = (60, 200, 120) if rem else (230, 90, 80)
+            tag = "REMEMBERED" if rem else "FORGOTTEN (UNKNOWN)"
+            msg = f"Cell ({r},{c}) | {rec['buried_piece']} | {rec['turns_ago']}t ago -> {tag}"
+            self.screen.blit(font_sm.render(msg, True, col), (sb_x, y))
+            y += 18
