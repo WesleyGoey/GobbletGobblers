@@ -31,3 +31,30 @@ class PygameGUI:
                     self.cell_size - 8
                 )
                 pygame.draw.rect(self.screen, (60, 48, 36), cell_rect, border_radius=8)
+
+    def draw_piece(self, surface: pygame.Surface, x: int, y: int, player: int, size: int):
+        """Draw a tactile 3D Gobbler figurine with cylindrical shading and expressive eyes."""
+        radius_map = {1: 18, 2: 30, 3: 44}
+        height_map = {1: 28, 2: 44, 3: 60}
+        radius = radius_map[size]
+        height = height_map[size]
+
+        # Colors: Blue (Human) vs Orange (AI)
+        body_color = (40, 140, 255) if player == PLAYER_BLUE else (255, 120, 20)
+        shadow_color = (20, 80, 160) if player == PLAYER_BLUE else (180, 70, 10)
+        highlight_color = (130, 200, 255) if player == PLAYER_BLUE else (255, 180, 90)
+
+        # Base shadow
+        pygame.draw.ellipse(surface, (20, 20, 20), (x - radius, y + height//2 - 6, radius * 2, 14))
+
+        # Cylindrical body
+        rect = pygame.Rect(x - radius, y - height//2, radius * 2, height)
+        pygame.draw.rect(surface, body_color, rect, border_radius=radius)
+        # Highlight top rim
+        pygame.draw.ellipse(surface, highlight_color, (x - radius + 3, y - height//2, radius * 2 - 6, 12))
+
+        # Expressive cartoon eyes
+        eye_y = y - height//4
+        for eye_x in [x - radius//3, x + radius//3]:
+            pygame.draw.circle(surface, (255, 255, 255), (eye_x, eye_y), 5)
+            pygame.draw.circle(surface, (20, 20, 20), (eye_x, eye_y), 2)

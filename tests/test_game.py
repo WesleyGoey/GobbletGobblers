@@ -155,3 +155,20 @@ class TestBoundedMemory(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestGUIFigurineRenderer(unittest.TestCase):
+    def test_gui_draw_piece_and_board(self):
+        import pygame
+        pygame.init()
+        from gui import PygameGUI
+        state = GameState(win_streak=5)
+        gui = PygameGUI(state)
+        surface = pygame.Surface((1280, 760))
+        # Ensure draw methods execute without error
+        gui.draw_board()
+        for player in [PLAYER_BLUE, PLAYER_ORANGE]:
+            for size in [1, 2, 3]:
+                gui.draw_piece(surface, 150 * size, 150 * player, player, size)
+        self.assertEqual(gui.board_size, 560)
+        self.assertEqual(gui.cell_size, 112)
