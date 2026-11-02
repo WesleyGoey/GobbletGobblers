@@ -2,6 +2,24 @@ import time
 from typing import Optional, Tuple, Dict, Any, List
 from game_engine import GameState, Move, PLAYER_BLUE, PLAYER_ORANGE
 
+DIFFICULTY_PRESETS = {
+    'Easy': {
+        'max_depth': 1,
+        'memory_window': 3,
+        'description': "Looks 1 ply ahead, remembers last 3 turns."
+    },
+    'Medium': {
+        'max_depth': 2,
+        'memory_window': 5,
+        'description': "Looks 2 plies ahead, remembers last 5 turns."
+    },
+    'Hard': {
+        'max_depth': 3,
+        'memory_window': 8,
+        'description': "Looks 3 plies ahead, remembers last 8 turns."
+    }
+}
+
 
 def build_belief_state(real_state: GameState, memory_window: int = 5) -> GameState:
     """Constructs the AI's internal belief state based on its bounded memory window."""
@@ -184,6 +202,13 @@ class MinimaxAgent:
 
         self.last_search_time = time.time() - start_time
         return best_move
+
+    def set_difficulty(self, tier: str):
+        if tier in DIFFICULTY_PRESETS:
+            cfg = DIFFICULTY_PRESETS[tier]
+            self.max_depth = cfg['max_depth']
+            self.memory_window = cfg['memory_window']
+
 
 class AIHeuristic:
     """Evaluates a board state from the perspective of PLAYER_ORANGE (AI)."""
