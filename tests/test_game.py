@@ -209,3 +209,14 @@ class TestWinningGlow(unittest.TestCase):
         gui.draw_winning_glow()
         self.assertTrue(state.game_over)
         self.assertEqual(len(state.winning_line), 5)
+
+
+def run_all_milestone_tests():
+    """Execute all test suites across engine, AI, and edge cases."""
+    loader = unittest.TestLoader()
+    suite = unittest.TestSuite()
+    suite.addTests(loader.discover('tests', pattern='test_*.py'))
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+    assert result.wasSuccessful(), f"Tests failed: {len(result.failures)} failures, {len(result.errors)} errors"
+    print("\n[SUCCESS] ALL TEST ASSERTIONS PASSED!\n")
