@@ -31,3 +31,24 @@ class PygameGUI:
                     self.cell_size - 8
                 )
                 pygame.draw.rect(self.screen, (60, 48, 36), cell_rect, border_radius=8)
+
+    def handle_click(self, mouse_pos: Tuple[int, int]):
+        """Handle player mouse clicks for selecting reserves or board relocation."""
+        mx, my = mouse_pos
+        # Check if clicked inside board
+        if self.board_x <= mx <= self.board_x + self.board_size and self.board_y <= my <= self.board_y + self.board_size:
+            col = (mx - self.board_x) // self.cell_size
+            row = (my - self.board_y) // self.cell_size
+            self.on_cell_clicked(row, col)
+
+    def on_cell_clicked(self, r: int, c: int):
+        if self.selected_reserve_size is not None:
+            # Place selected reserve piece
+            move = Move(self.state.current_player, 'drop', to_pos=(r, c), size=self.selected_reserve_size)
+            if self.state.apply_move(move):
+                self.selected_reserve_size = None
+        else:
+            # Select piece on board to move
+            top = self.state.get_top_piece(r, c)
+            if top and top.player == self.state.current_player:
+                self.selected_board_pos = (r, c)
