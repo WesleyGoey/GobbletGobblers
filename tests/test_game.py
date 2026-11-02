@@ -192,3 +192,20 @@ class TestGUIDecisionFeed(unittest.TestCase):
         gui.draw_sidebar_container()
         gui.draw_ai_decision_feed(ai)
         self.assertGreater(ai.nodes_evaluated, 0)
+
+
+class TestWinningGlow(unittest.TestCase):
+    def test_draw_winning_glow(self):
+        import pygame
+        pygame.init()
+        from gui import PygameGUI
+        state = GameState(win_streak=5)
+        gui = PygameGUI(state)
+        # Without game over, should return gracefully
+        gui.draw_winning_glow()
+        # Simulate game over with winning line
+        state.game_over = True
+        state.winning_line = [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4)]
+        gui.draw_winning_glow()
+        self.assertTrue(state.game_over)
+        self.assertEqual(len(state.winning_line), 5)

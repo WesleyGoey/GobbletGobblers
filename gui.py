@@ -163,3 +163,19 @@ class PygameGUI:
         self.selected_board_pos = None
         self.ai_agent.reset_telemetry()
         print("Game restarted successfully.")
+
+    def draw_winning_glow(self):
+        """Draw an animated golden glow line connecting the 5 winning pieces."""
+        if not self.state.game_over or not self.state.winning_line:
+            return
+
+        glow_surf = pygame.Surface((self.screen_width, self.screen_height), pygame.SRCALPHA)
+        coords = [
+            (self.board_x + c * self.cell_size + self.cell_size // 2,
+             self.board_y + r * self.cell_size + self.cell_size // 2)
+            for r, c in self.state.winning_line
+        ]
+        # Draw glowing beam
+        pygame.draw.lines(glow_surf, (255, 215, 0, 180), False, coords, 14)
+        pygame.draw.lines(glow_surf, (255, 255, 255, 240), False, coords, 6)
+        self.screen.blit(glow_surf, (0, 0))
