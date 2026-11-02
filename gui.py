@@ -83,3 +83,19 @@ class PygameGUI:
             top = self.state.get_top_piece(r, c)
             if top and top.player == self.state.current_player:
                 self.selected_board_pos = (r, c)
+    
+    def draw_sidebar_container(self):
+        """Draw the right telemetry dashboard container."""
+        sb_x = 640
+        sb_y = 40
+        sb_w = 600
+        sb_h = 680
+        # Background card
+        rect = pygame.Rect(sb_x, sb_y, sb_w, sb_h)
+        pygame.draw.rect(self.screen, (28, 33, 40), rect, border_radius=12)
+        pygame.draw.rect(self.screen, (55, 65, 80), rect, 2, border_radius=12)
+
+        # Header Title
+        font_title = pygame.font.SysFont("Arial", 20, bold=True)
+        txt = font_title.render("AI TELEMETRY & DECISION HUD", True, (240, 243, 246))
+        self.screen.blit(txt, (sb_x + 20, sb_y + 18))
