@@ -1,254 +1,43 @@
+"""
+ai_agent.py - Minimax with Alpha-Beta Pruning, Bounded Rationality (Forgetting Memory),
+and Real-time Live Decision Logging for 5x5 Gobblet Gobblers.
+
+Key features:
+1. Memory Window of 5 moves:
+   - AI tracks the history of moves.
+   - Buried pieces covered within the last 5 moves are remembered.
+   - Buried pieces covered >5 moves ago are FORGOTTEN (treated as empty/unknown underneath in belief state).
+2. Minimax + Alpha-Beta Pruning:
+   - Operates on the AI's internal belief state.
+   - Evaluates line potential (3-of-4, 2-of-4), center control, reserve dominance, and trap risks.
+3. Live Decision Telemetry:
+   - Emits structured events for every node visit, evaluation, alpha-beta cutoff, and candidate move.
+   - Enables real-time visualization of search trees, pruned branches, and memory belief.
+"""
+
+from typing import List, Tuple, Optional, Dict, Any, Callable
 import time
-from typing import Optional, Tuple, Dict, Any, List
-from game_engine import GameState, Move, PLAYER_BLUE, PLAYER_ORANGE
+import math
+import threading
+from game_engine import (
+    GameState, Piece, Move, WINNING_LINES, WINNING_LINES_4, WINNING_LINES_5,
+    PLAYER_BLUE, PLAYER_ORANGE, SIZE_SYMBOLS, SIZE_NAMES, PLAYER_NAMES
+)
 
-DIFFICULTY_PRESETS = {
-    'Easy': {
-        'max_depth': 1,
-        'memory_window': 3,
-        'description': "Looks 1 ply ahead, remembers last 3 turns."
-    },
-    'Medium': {
-        'max_depth': 2,
-        'memory_window': 5,
-        'description': "Looks 2 plies ahead, remembers last 5 turns."
-    },
-    'Hard': {
-        'max_depth': 3,
-        'memory_window': 8,
-        'description': "Looks 3 plies ahead, remembers last 8 turns."
-    }
-}
-
-
-def build_belief_state(real_state: GameState, memory_window: int = 5) -> GameState:
-    """Constructs the AI's internal belief state based on its bounded memory window."""
-    belief = GameState(win_streak=real_state.win_streak)
-    current_turn = real_state.turn_number
-
-    for r in range(5):
-        for c in range(5):
-            real_stack = real_state.get_cell_stack(r, c)
-            if not real_stack:
-                continue
-            top_piece = real_stack[-1]
-            if len(real_stack) == 1:
-                belief.board[r][c] = [top_piece]
-                belief.covered_turns[r][c] = [None]
-            else:
-                covered_turns = real_state.get_cell_covered_turns(r, c)
-                belief_stack = []
-                belief_covered_turns = []
-                for idx, buried_piece in enumerate(real_stack[:-1]):
-                    turn_covered = covered_turns[idx] if idx < len(covered_turns) else None
-                    turns_ago = (current_turn - turn_covered) if turn_covered is not None else 999
-                    if turns_ago <= memory_window:
-                        belief_stack.append(buried_piece)  # AI remembers
-                        belief_covered_turns.append(turn_covered)
-                    # Otherwise forgotten!
-                belief_stack.append(top_piece)
-                belief_covered_turns.append(None)
-                belief.board[r][c] = belief_stack
-                belief.covered_turns[r][c] = belief_covered_turns
-
-    belief.reserves = {p: dict(res) for p, res in real_state.reserves.items()}
-    belief.current_player = real_state.current_player
-    belief.turn_number = real_state.turn_number
-    return belief
-
-
-class MinimaxAgent:
-    """Adversarial AI agent using Minimax search and bounded rationality."""
-
-    def __init__(self, player: int = PLAYER_ORANGE, max_depth: int = 3, memory_window: int = 5):
-        self.player = player
-        self.max_depth = max_depth
-        self.memory_window = memory_window
-        self.nodes_evaluated = 0
-        self.pruned_branches = 0
-        self.last_search_time = 0.0
-        self.candidate_moves: List[Dict[str, Any]] = []
-
-    def reset_telemetry(self):
-        """Reset search performance counters before each search execution."""
-        self.nodes_evaluated = 0
-        self.pruned_branches = 0
-        self.candidate_moves.clear()
-
-    def evaluate_state(self, state: GameState) -> float:
-        """Heuristic evaluation of board state from the perspective of self.player."""
-        return AIHeuristic.evaluate(state, self.player)
-
-    def _minimax(self, state: GameState, depth: int, is_maximizing: bool) -> float:
-        """Recursive adversarial minimax traversal over game states."""
-        self.nodes_evaluated += 1
-
-        winner, _ = state.check_winner_on_board()
-        if winner == self.player:
-            return 10000.0 - (self.max_depth - depth)
-        elif winner is not None:
-            return -10000.0 + (self.max_depth - depth)
-        if depth == 0 or state.game_over:
-            return self.evaluate_state(state)
-
-        legal_moves = state.get_legal_moves()
-        if not legal_moves:
-            return 0.0
-
-        if is_maximizing:
-            max_eval = -float('inf')
-            for move in legal_moves:
-                child = state.clone()
-                child.apply_move(move)
-                ev = self._minimax(child, depth - 1, False)
-                max_eval = max(max_eval, ev)
-            return max_eval
-        else:
-            min_eval = float('inf')
-            for move in legal_moves:
-                child = state.clone()
-                child.apply_move(move)
-                ev = self._minimax(child, depth - 1, True)
-                min_eval = min(min_eval, ev)
-            return min_eval
-
-    def order_moves(self, state: GameState, moves: List[Move]) -> List[Move]:
-        """Order moves heuristically so best branches are evaluated first, maximizing cutoffs."""
-        def move_weight(m: Move) -> int:
-            weight = 0
-            r, c = m.to_pos
-            # Center control priority
-            if (r, c) == (2, 2):
-                weight += 50
-            elif (r, c) in {(1, 1), (1, 2), (1, 3), (2, 1), (2, 3), (3, 1), (3, 2), (3, 3)}:
-                weight += 20
-            # Gobbling opponent piece priority
-            top = state.get_top_piece(r, c)
-            if top and top.player != self.player:
-                weight += 40 * top.size
-            # Size priority
-            if m.size:
-                weight += m.size * 5
-            return weight
-
-        return sorted(moves, key=move_weight, reverse=True)
-
-    def _alpha_beta(self, state: GameState, depth: int, alpha: float, beta: float, is_maximizing: bool) -> float:
-        """Minimax with Alpha-Beta Pruning to skip suboptimal search branches."""
-        self.nodes_evaluated += 1
-
-        winner, _ = state.check_winner_on_board()
-        if winner == self.player:
-            return 10000.0 - (self.max_depth - depth)
-        elif winner is not None:
-            return -10000.0 + (self.max_depth - depth)
-        if depth == 0 or state.game_over:
-            return self.evaluate_state(state)
-
-        legal_moves = self.order_moves(state, state.get_legal_moves())
-        if not legal_moves:
-            return 0.0
-
-        if is_maximizing:
-            max_eval = -float('inf')
-            for move in legal_moves:
-                child = state.clone()
-                child.apply_move(move)
-                ev = self._alpha_beta(child, depth - 1, alpha, beta, False)
-                max_eval = max(max_eval, ev)
-                alpha = max(alpha, ev)
-                if beta <= alpha:
-                    self.pruned_branches += 1
-                    break
-            return max_eval
-        else:
-            min_eval = float('inf')
-            for move in legal_moves:
-                child = state.clone()
-                child.apply_move(move)
-                ev = self._alpha_beta(child, depth - 1, alpha, beta, True)
-                min_eval = min(min_eval, ev)
-                beta = min(beta, ev)
-                if beta <= alpha:
-                    self.pruned_branches += 1
-                    break
-            return min_eval
-
-    def get_best_move(self, real_state: GameState) -> Optional[Move]:
-        """Find and return the optimal move from the current game state."""
-        self.reset_telemetry()
-        start_time = time.time()
-
-        # Build belief state based on bounded memory
-        state = build_belief_state(real_state, self.memory_window)
-        legal_moves = self.order_moves(state, state.get_legal_moves(self.player))
-        if not legal_moves:
-            return None
-
-        best_score = -float('inf')
-        best_move = legal_moves[0]
-        alpha = -float('inf')
-        beta = float('inf')
-
-        for move in legal_moves:
-            child = state.clone()
-            child.apply_move(move)
-            score = self._alpha_beta(child, self.max_depth - 1, alpha, beta, False)
-            self.candidate_moves.append({'move': move, 'score': score})
-            if score > best_score:
-                best_score = score
-                best_move = move
-            alpha = max(alpha, best_score)
-
-        self.last_search_time = time.time() - start_time
-        return best_move
-
-    def set_difficulty(self, tier: str):
-        if tier in DIFFICULTY_PRESETS:
-            cfg = DIFFICULTY_PRESETS[tier]
-            self.max_depth = cfg['max_depth']
-            self.memory_window = cfg['memory_window']
-
-
-class AIHeuristic:
-    """Evaluates a board state from the perspective of PLAYER_ORANGE (AI)."""
-
-    @classmethod
-    def evaluate(cls, state: GameState, ai_player: int = PLAYER_ORANGE) -> float:
-        human_player = PLAYER_BLUE if ai_player == PLAYER_ORANGE else PLAYER_ORANGE
-        winner, _ = state.check_winner_on_board()
-        if winner == ai_player:
-            return 10000.0
-        elif winner == human_player:
-            return -10000.0
-
-        score = 0.0
-        for line in state.winning_lines:
-            ai_count = sum(1 for r, c in line if state.get_top_piece(r, c) and state.get_top_piece(r, c).player == ai_player)
-            human_count = sum(1 for r, c in line if state.get_top_piece(r, c) and state.get_top_piece(r, c).player == human_player)
-
-            if human_count == 0 and ai_count > 0:
-                if ai_count >= 4: score += 650.0
-                elif ai_count == 3: score += 150.0
-                elif ai_count == 2: score += 28.0
-            elif ai_count == 0 and human_count > 0:
-                if human_count >= 4: score -= 820.0  # High defense priority
-                elif human_count == 3: score -= 170.0
-                elif human_count == 2: score -= 32.0
-
-        # Center control bonus
-        center = state.get_top_piece(2, 2)
-        if center:
-            score += 35.0 if center.player == ai_player else -35.0
-
-        return score
 
 class MemoryInspector:
     """Tracks and reports what the AI remembers vs what it has forgotten."""
+
     @staticmethod
     def get_memory_snapshot(game_state: GameState, memory_window: int = 5) -> List[Dict[str, Any]]:
+        """
+        Inspect all cells on the board that have buried pieces (depth > 1).
+        Determines if the buried pieces were covered within the last `memory_window` turns.
+        Returns a list of status dictionaries for GUI display.
+        """
         current_turn = game_state.turn_number
-        records = []
+        memory_records = []
+
         for r in range(5):
             for c in range(5):
                 stack = game_state.get_cell_stack(r, c)
@@ -259,11 +48,681 @@ class MemoryInspector:
                         turn_covered = covered_turns[idx] if idx < len(covered_turns) else None
                         turns_ago = (current_turn - turn_covered) if turn_covered is not None else 999
                         is_remembered = (turns_ago <= memory_window)
-                        records.append({
+
+                        p_col = "Blue" if buried_piece.player == PLAYER_BLUE else "Orange"
+                        s_name = SIZE_NAMES.get(buried_piece.size, str(buried_piece.size)).split()[0]
+                        rem_label = f"{s_name} {p_col}"
+
+                        status_text = (
+                            f"{rem_label} (remembered, {turns_ago}t ago)"
+                            if is_remembered else
+                            f"UNKNOWN (Forgotten >{memory_window}t)"
+                        )
+
+                        memory_records.append({
                             'pos': (r, c),
+                            'depth': idx,
+                            'top_piece': top_piece,
                             'buried_piece': buried_piece,
+                            'turn_covered': turn_covered,
                             'turns_ago': turns_ago,
                             'is_remembered': is_remembered,
-                            'status': "Remembered" if is_remembered else "Forgotten (UNKNOWN)"
+                            'status_text': status_text,
+                            'display_str': (
+                                f"Cell ({r},{c}) buried: {rem_label} (remembered)"
+                                if is_remembered else
+                                f"Cell ({r},{c}) buried piece: UNKNOWN (forgotten)"
+                            )
                         })
-        return records
+
+        return memory_records
+
+
+def build_belief_state(real_state: GameState, memory_window: int = 5) -> GameState:
+    """
+    Constructs the AI's internal belief state based on its bounded memory.
+    - Top pieces on the board are always visible.
+    - Buried pieces covered within the last `memory_window` moves are remembered.
+    - Buried pieces covered > `memory_window` moves ago are forgotten (omitted / empty underneath).
+    """
+    belief = GameState(win_streak=real_state.win_streak)
+    current_turn = real_state.turn_number
+
+    for r in range(5):
+        for c in range(5):
+            real_stack = real_state.get_cell_stack(r, c)
+            if not real_stack:
+                belief.board[r][c] = []
+                belief.covered_turns[r][c] = []
+                continue
+
+            top_piece = real_stack[-1]
+            if len(real_stack) == 1:
+                belief.board[r][c] = [top_piece]
+                belief.covered_turns[r][c] = [None]
+            else:
+                covered_turns = real_state.get_cell_covered_turns(r, c)
+                belief_stack = []
+                belief_cov = []
+                for idx, buried_piece in enumerate(real_stack[:-1]):
+                    turn_covered = covered_turns[idx] if idx < len(covered_turns) else None
+                    turns_ago = (current_turn - turn_covered) if turn_covered is not None else 999
+                    if turns_ago <= memory_window:
+                        # AI remembers this buried piece
+                        belief_stack.append(buried_piece)
+                        belief_cov.append(turn_covered)
+                    else:
+                        # AI has forgotten this buried piece! It is omitted from belief stack.
+                        pass
+                belief_stack.append(top_piece)
+                belief_cov.append(None)
+                belief.board[r][c] = belief_stack
+                belief.covered_turns[r][c] = belief_cov
+
+    # Copy reserves and turn metadata
+    belief.reserves = {
+        p: dict(res) for p, res in real_state.reserves.items()
+    }
+    belief.current_player = real_state.current_player
+    belief.turn_number = real_state.turn_number
+    belief.move_history = list(real_state.move_history)
+    return belief
+
+
+class AIHeuristic:
+    """Evaluates a board state from the perspective of PLAYER_ORANGE (AI)."""
+
+    CENTER_CELLS = {(2, 2)}
+    INNER_RING = {(1, 1), (1, 2), (1, 3), (2, 1), (2, 3), (3, 1), (3, 2), (3, 3)}
+
+    @classmethod
+    def evaluate(cls, state: GameState, ai_player: int = PLAYER_ORANGE) -> float:
+        """
+        Returns a heuristic score.
+        Positive is favorable to ai_player (Orange), negative favorable to human (Blue).
+        """
+        human_player = PLAYER_BLUE if ai_player == PLAYER_ORANGE else PLAYER_ORANGE
+
+        winner, _ = state.check_winner_on_board()
+        if winner == ai_player:
+            return 10000.0
+        elif winner == human_player:
+            return -10000.0
+
+        score = 0.0
+        win_target = getattr(state, 'win_streak', 5)
+        winning_lines = getattr(state, 'winning_lines', WINNING_LINES_5 if win_target == 5 else WINNING_LINES_4)
+
+        human_res = state.reserves.get(human_player, {})
+        ai_res = state.reserves.get(ai_player, {})
+        max_human_res_size = max([s for s, cnt in human_res.items() if cnt > 0], default=0)
+        max_ai_res_size = max([s for s, cnt in ai_res.items() if cnt > 0], default=0)
+
+        # 1. Line Potential Analysis (across winning lines)
+        for line in winning_lines:
+            ai_count = 0
+            human_count = 0
+            empty_count = 0
+            ai_pieces = []
+            human_pieces = []
+
+            for r, c in line:
+                top = state.get_top_piece(r, c)
+                if top is None:
+                    empty_count += 1
+                elif top.player == ai_player:
+                    ai_count += 1
+                    ai_pieces.append((r, c, top.size))
+                else:
+                    human_count += 1
+                    human_pieces.append((r, c, top.size))
+
+            # If line is uncontested by opponent:
+            if human_count == 0 and ai_count > 0:
+                if win_target == 5:
+                    if ai_count >= 4:
+                        score += 650.0  # 4-of-5: Immediate winning threat on next turn!
+                    elif ai_count == 3:
+                        score += 150.0  # 3-of-5: Strong threat & critical fork setup
+                    elif ai_count == 2:
+                        score += 28.0   # 2-of-5
+                    elif ai_count >= 1:
+                        score += 6.0    # 1-of-5
+                else:
+                    if ai_count == win_target - 1:
+                        score += 250.0  # One move away from win!
+                    elif ai_count == win_target - 2:
+                        score += 45.0
+                    elif ai_count >= 1:
+                        score += 8.0
+
+            elif ai_count == 0 and human_count > 0:
+                if win_target == 5:
+                    if human_count >= 4:
+                        score -= 820.0  # 4-of-5: Immediate lethal danger! Must block
+                    elif human_count == 3:
+                        score -= 170.0  # 3-of-5: Severe human threat
+                    elif human_count == 2:
+                        score -= 32.0   # 2-of-5
+                    elif human_count >= 1:
+                        score -= 8.0    # 1-of-5
+                else:
+                    if human_count == win_target - 1:
+                        score -= 300.0  # Immediate danger! Must block
+                    elif human_count == win_target - 2:
+                        score -= 55.0
+                    elif human_count >= 1:
+                        score -= 10.0
+
+            # Contested lines: check for active gobble-through threats
+            elif ai_count > 0 and human_count > 0:
+                if win_target == 5:
+                    if human_count == 4 and ai_count == 1:
+                        # 4 human pieces blocked by 1 AI piece: check if human can gobble it!
+                        ai_pos_size = ai_pieces[0][2]
+                        can_gobble = (max_human_res_size > ai_pos_size) or any(
+                            state.get_top_size(br, bc) > ai_pos_size
+                            for br in range(5) for bc in range(5)
+                            if (br, bc) not in line and state.get_top_piece(br, bc) and state.get_top_piece(br, bc).player == human_player
+                        )
+                        if can_gobble:
+                            score -= 780.0  # Human can gobble this piece and win immediately!
+                        else:
+                            score += 20.0   # Solid secure block by AI Large piece
+                    elif ai_count == 4 and human_count == 1:
+                        # 4 AI pieces blocked by 1 human piece: check if AI can gobble it!
+                        human_pos_size = human_pieces[0][2]
+                        can_gobble = (max_ai_res_size > human_pos_size) or any(
+                            state.get_top_size(br, bc) > human_pos_size
+                            for br in range(5) for bc in range(5)
+                            if (br, bc) not in line and state.get_top_piece(br, bc) and state.get_top_piece(br, bc).player == ai_player
+                        )
+                        if can_gobble:
+                            score += 620.0  # AI can gobble and win on next turn!
+                        else:
+                            score -= 20.0
+                    elif human_count == 3 and ai_count == 1 and empty_count == 1:
+                        # 3 human + 1 AI (gobbleable) + 1 empty
+                        ai_pos_size = ai_pieces[0][2]
+                        if max_human_res_size > ai_pos_size:
+                            score -= 140.0  # Live 3-of-5 threat
+                    elif ai_count == 3 and human_count == 1 and empty_count == 1:
+                        # 3 AI + 1 human (gobbleable) + 1 empty
+                        human_pos_size = human_pieces[0][2]
+                        if max_ai_res_size > human_pos_size:
+                            score += 125.0  # Live 3-of-5 threat
+                    else:
+                        diff = ai_count - human_count
+                        score += diff * 5.0
+                else:
+                    if human_count == win_target - 1 and ai_count == 1:
+                        ai_pos_size = ai_pieces[0][2]
+                        can_gobble = (max_human_res_size > ai_pos_size)
+                        if can_gobble:
+                            score -= 280.0
+                        else:
+                            score += 15.0
+                    elif ai_count == win_target - 1 and human_count == 1:
+                        human_pos_size = human_pieces[0][2]
+                        can_gobble = (max_ai_res_size > human_pos_size)
+                        if can_gobble:
+                            score += 230.0
+                        else:
+                            score -= 15.0
+                    else:
+                        diff = ai_count - human_count
+                        score += diff * 5.0
+
+        # 2. Board Positional Advantage (Center control)
+        for r, c in cls.CENTER_CELLS:
+            top = state.get_top_piece(r, c)
+            if top:
+                mult = 1.0 if top.player == ai_player else -1.0
+                score += mult * 35.0
+
+        for r, c in cls.INNER_RING:
+            top = state.get_top_piece(r, c)
+            if top:
+                mult = 1.0 if top.player == ai_player else -1.0
+                score += mult * 15.0
+
+        # 3. Reserve Advantage
+        # Large (Size 3) pieces are the most powerful gobblers
+        ai_res = state.reserves[ai_player]
+        human_res = state.reserves[human_player]
+
+        res_val_ai = ai_res[3] * 20.0 + ai_res[2] * 10.0 + ai_res[1] * 3.0
+        res_val_human = human_res[3] * 20.0 + human_res[2] * 10.0 + human_res[1] * 3.0
+        score += (res_val_ai - res_val_human)
+
+        # 4. Trap Risk & Uncover Vulnerability Analysis
+        # Evaluates hidden uncover liabilities (pinned AI pieces) and latent traps (human covering AI)
+        for r in range(5):
+            for c in range(5):
+                stack = state.get_cell_stack(r, c)
+                if len(stack) > 1:
+                    top_piece = stack[-1]
+                    covered_piece = stack[-2]
+
+                    # Case A: AI piece covers a human piece (Pinned AI piece / Uncover trap risk!)
+                    if top_piece.player == ai_player and covered_piece.player == human_player:
+                        for line in winning_lines:
+                            if (r, c) in line:
+                                human_in_line = sum(
+                                    1 for lr, lc in line
+                                    if (lr, lc) != (r, c) and state.get_top_piece(lr, lc) and state.get_top_piece(lr, lc).player == human_player
+                                )
+                                if win_target == 5:
+                                    if human_in_line >= 4:
+                                        # Lifting immediately reveals 5th human piece => instant human win!
+                                        score -= 750.0
+                                    elif human_in_line == 3:
+                                        # Lifting reveals 4-of-5 threat!
+                                        score -= 180.0
+                                    elif human_in_line == 2:
+                                        # Lifting reveals 3-of-5 threat!
+                                        score -= 50.0
+                                    elif human_in_line >= 1:
+                                        score -= 15.0
+                                else:
+                                    if human_in_line == win_target - 1:
+                                        # Lifting this AI piece immediately creates human win!
+                                        score -= 450.0
+                                    elif human_in_line == win_target - 2:
+                                        score -= 90.0
+                                    elif human_in_line >= 1:
+                                        score -= 20.0
+
+                    # Case B: Human piece covers an AI piece (Latent trap set for human!)
+                    elif top_piece.player == human_player and covered_piece.player == ai_player:
+                        for line in winning_lines:
+                            if (r, c) in line:
+                                ai_in_line = sum(
+                                    1 for lr, lc in line
+                                    if (lr, lc) != (r, c) and state.get_top_piece(lr, lc) and state.get_top_piece(lr, lc).player == ai_player
+                                )
+                                if win_target == 5:
+                                    if ai_in_line >= 4:
+                                        # If human lifts, AI immediately gets 5-in-a-row!
+                                        score += 600.0
+                                    elif ai_in_line == 3:
+                                        # If human lifts, AI gets 4-of-5!
+                                        score += 150.0
+                                    elif ai_in_line == 2:
+                                        # If human lifts, AI gets 3-of-5!
+                                        score += 40.0
+                                    elif ai_in_line >= 1:
+                                        score += 10.0
+                                else:
+                                    if ai_in_line == win_target - 1:
+                                        # If human lifts, AI immediately gets win!
+                                        score += 350.0
+                                    elif ai_in_line == win_target - 2:
+                                        score += 80.0
+                                    elif ai_in_line >= 1:
+                                        score += 15.0
+
+                    # Case C: Friendly stack (AI piece covers AI piece)
+                    elif top_piece.player == ai_player and covered_piece.player == ai_player:
+                        score += 10.0
+
+        return score
+
+
+class SearchTelemetry:
+    """Holds real-time search state and decision logs for the live GUI panel (thread-safe)."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.reset()
+
+    def reset(self):
+        with self.lock:
+            self.is_searching: bool = False
+            self.current_depth: int = 0
+            self.max_depth: int = 3
+            self.nodes_visited: int = 0
+            self.prune_count: int = 0
+            self.start_time: float = 0.0
+            self.elapsed_time: float = 0.0
+
+            # Tree logs and candidate moves
+            self.candidate_scores: Dict[str, float] = {}  # move_str -> score
+            self.current_branch: List[str] = []           # moves in current search path
+            self.tree_log: List[Dict[str, Any]] = []      # recent node visits / pruned events
+            self.pruned_branches: List[str] = []          # descriptions of pruned cuts
+            self.best_move: Optional[Move] = None
+            self.best_score: float = -math.inf
+            self.memory_snapshot: List[Dict[str, Any]] = []
+
+    def get_candidate_scores_copy(self) -> List[Tuple[str, float]]:
+        with self.lock:
+            return list(self.candidate_scores.items())
+
+    def get_pruned_branches_copy(self) -> List[str]:
+        with self.lock:
+            return list(self.pruned_branches)
+
+    def get_current_branch_copy(self) -> List[str]:
+        with self.lock:
+            return list(self.current_branch)
+
+    def get_memory_snapshot_copy(self) -> List[Dict[str, Any]]:
+        with self.lock:
+            return list(self.memory_snapshot)
+
+
+class MinimaxAgent:
+    """
+    Minimax agent with Alpha-Beta Pruning, Bounded Rationality (5-move Memory Window),
+    and live real-time search event callbacks.
+    """
+
+    def __init__(
+        self,
+        player: int = PLAYER_ORANGE,
+        max_depth: int = 3,
+        memory_window: int = 5,
+        telemetry: Optional[SearchTelemetry] = None
+    ):
+        self.player = player
+        self.max_depth = max_depth
+        self.memory_window = memory_window
+        self.telemetry = telemetry if telemetry is not None else SearchTelemetry()
+        self.step_delay: float = 0.005  # Slight throttle for visually satisfying live updates
+
+    def get_action(
+        self,
+        real_state: GameState,
+        step_callback: Optional[Callable[[str, Any], None]] = None,
+        cancel_event: Optional[threading.Event] = None
+    ) -> Optional[Move]:
+        """
+        Executes Minimax search on the AI's internal belief state.
+        Calls step_callback to provide real-time telemetry updates.
+        Returns the chosen Move.
+        """
+        search_depth = self.max_depth
+        search_memory = self.memory_window
+
+        self.telemetry.reset()
+        self.telemetry.is_searching = True
+        self.telemetry.max_depth = search_depth
+        self.telemetry.start_time = time.time()
+
+        # Step 1: Capture and log memory state
+        memory_records = MemoryInspector.get_memory_snapshot(real_state, search_memory)
+        self.telemetry.memory_snapshot = memory_records
+        if step_callback:
+            step_callback('MEMORY_STATE', memory_records)
+
+        # Step 2: Build internal belief state with forgetting memory
+        belief_state = build_belief_state(real_state, search_memory)
+
+        # Step 3: Get legal moves
+        legal_moves = belief_state.get_legal_moves(self.player)
+        if not legal_moves:
+            self.telemetry.is_searching = False
+            return None
+
+        # Sort moves heuristically (drops of size 3 first, then center moves)
+        legal_moves.sort(key=lambda m: (
+            m.size if m.size else 0,
+            1 if m.to_pos == (2, 2) else 0,
+            1 if m.to_pos in AIHeuristic.INNER_RING else 0
+        ), reverse=True)
+
+        best_move = legal_moves[0]
+        alpha = -math.inf
+        beta = math.inf
+        best_score = -math.inf
+
+        # Root level search
+        for move in legal_moves:
+            if cancel_event and cancel_event.is_set():
+                with self.telemetry.lock:
+                    self.telemetry.is_searching = False
+                return None
+
+            move_str = str(move)
+            with self.telemetry.lock:
+                self.telemetry.current_branch = [move_str]
+                self.telemetry.nodes_visited += 1
+
+            if step_callback:
+                step_callback('EXPLORING_ROOT', {
+                    'move': move,
+                    'move_str': move_str,
+                    'alpha': alpha,
+                    'beta': beta
+                })
+
+            # Simulate move on cloned belief state
+            next_state = belief_state.clone()
+            next_state.apply_move(move)
+
+            # Check if this move wins immediately
+            if next_state.winner == self.player:
+                score = 10000.0
+            else:
+                score = self._min_value(
+                    next_state,
+                    depth=1,
+                    alpha=alpha,
+                    beta=beta,
+                    path=[move_str],
+                    step_callback=step_callback,
+                    search_depth=search_depth,
+                    cancel_event=cancel_event
+                )
+
+            if cancel_event and cancel_event.is_set():
+                with self.telemetry.lock:
+                    self.telemetry.is_searching = False
+                return None
+
+            with self.telemetry.lock:
+                self.telemetry.candidate_scores[move_str] = round(score, 1)
+                if score > best_score:
+                    best_score = score
+                    best_move = move
+                    self.telemetry.best_move = best_move
+                    self.telemetry.best_score = round(best_score, 1)
+
+            alpha = max(alpha, best_score)
+
+            if step_callback:
+                step_callback('ROOT_EVAL', {
+                    'move': move,
+                    'move_str': move_str,
+                    'score': score,
+                    'best_move': best_move,
+                    'best_score': best_score
+                })
+
+            if self.step_delay > 0:
+                time.sleep(self.step_delay)
+
+        with self.telemetry.lock:
+            self.telemetry.is_searching = False
+            self.telemetry.elapsed_time = time.time() - self.telemetry.start_time
+            self.telemetry.best_move = best_move
+            self.telemetry.best_score = round(best_score, 1)
+
+        if step_callback:
+            step_callback('SEARCH_COMPLETE', {
+                'best_move': best_move,
+                'best_score': best_score,
+                'nodes_visited': self.telemetry.nodes_visited,
+                'prune_count': self.telemetry.prune_count,
+                'elapsed_time': self.telemetry.elapsed_time
+            })
+
+        return best_move
+
+    def _max_value(
+        self,
+        state: GameState,
+        depth: int,
+        alpha: float,
+        beta: float,
+        path: List[str],
+        step_callback: Optional[Callable[[str, Any], None]],
+        search_depth: Optional[int] = None,
+        cancel_event: Optional[threading.Event] = None
+    ) -> float:
+        if cancel_event and cancel_event.is_set():
+            return 0.0
+
+        target_depth = search_depth if search_depth is not None else self.max_depth
+
+        with self.telemetry.lock:
+            self.telemetry.nodes_visited += 1
+
+        if state.game_over:
+            if state.winner == self.player:
+                return 10000.0 - depth * 10
+            elif state.winner is not None:
+                return -10000.0 + depth * 10
+            return 0.0
+
+        if depth >= target_depth:
+            return AIHeuristic.evaluate(state, self.player)
+
+        moves = state.get_legal_moves(self.player)
+        if not moves:
+            return AIHeuristic.evaluate(state, self.player)
+
+        # Move ordering heuristic
+        moves.sort(key=lambda m: (m.size if m.size else 0), reverse=True)
+
+        value = -math.inf
+        for move in moves:
+            if cancel_event and cancel_event.is_set():
+                return 0.0
+
+            move_str = str(move)
+            new_path = path + [move_str]
+            with self.telemetry.lock:
+                self.telemetry.current_branch = new_path
+
+            if step_callback and self.telemetry.nodes_visited % 15 == 0:
+                step_callback('NODE_VISIT', {
+                    'depth': depth,
+                    'path': new_path,
+                    'alpha': alpha,
+                    'beta': beta
+                })
+
+            next_state = state.clone()
+            next_state.apply_move(move)
+
+            v = self._min_value(
+                next_state, depth + 1, alpha, beta, new_path, step_callback,
+                search_depth=target_depth, cancel_event=cancel_event
+            )
+            value = max(value, v)
+
+            if value >= beta:
+                prune_msg = f"[PRUNED] at d={depth}: {move_str} (score {value:.1f} >= beta {beta:.1f})"
+                with self.telemetry.lock:
+                    self.telemetry.prune_count += 1
+                    self.telemetry.pruned_branches.append(prune_msg)
+                    if len(self.telemetry.pruned_branches) > 8:
+                        self.telemetry.pruned_branches.pop(0)
+
+                if step_callback:
+                    step_callback('PRUNED', {
+                        'depth': depth,
+                        'move_str': move_str,
+                        'message': prune_msg
+                    })
+                return value
+
+            alpha = max(alpha, value)
+
+        return value
+
+    def _min_value(
+        self,
+        state: GameState,
+        depth: int,
+        alpha: float,
+        beta: float,
+        path: List[str],
+        step_callback: Optional[Callable[[str, Any], None]],
+        search_depth: Optional[int] = None,
+        cancel_event: Optional[threading.Event] = None
+    ) -> float:
+        if cancel_event and cancel_event.is_set():
+            return 0.0
+
+        target_depth = search_depth if search_depth is not None else self.max_depth
+
+        with self.telemetry.lock:
+            self.telemetry.nodes_visited += 1
+
+        human_player = PLAYER_BLUE if self.player == PLAYER_ORANGE else PLAYER_ORANGE
+
+        if state.game_over:
+            if state.winner == self.player:
+                return 10000.0 - depth * 10
+            elif state.winner is not None:
+                return -10000.0 + depth * 10
+            return 0.0
+
+        if depth >= target_depth:
+            return AIHeuristic.evaluate(state, self.player)
+
+        moves = state.get_legal_moves(human_player)
+        if not moves:
+            return AIHeuristic.evaluate(state, self.player)
+
+        moves.sort(key=lambda m: (m.size if m.size else 0), reverse=True)
+
+        value = math.inf
+        for move in moves:
+            if cancel_event and cancel_event.is_set():
+                return 0.0
+
+            move_str = str(move)
+            new_path = path + [move_str]
+            with self.telemetry.lock:
+                self.telemetry.current_branch = new_path
+
+            if step_callback and self.telemetry.nodes_visited % 15 == 0:
+                step_callback('NODE_VISIT', {
+                    'depth': depth,
+                    'path': new_path,
+                    'alpha': alpha,
+                    'beta': beta
+                })
+
+            next_state = state.clone()
+            next_state.apply_move(move)
+
+            v = self._max_value(
+                next_state, depth + 1, alpha, beta, new_path, step_callback,
+                search_depth=target_depth, cancel_event=cancel_event
+            )
+            value = min(value, v)
+
+            if value <= alpha:
+                prune_msg = f"[PRUNED] at d={depth}: {move_str} (score {value:.1f} <= alpha {alpha:.1f})"
+                with self.telemetry.lock:
+                    self.telemetry.prune_count += 1
+                    self.telemetry.pruned_branches.append(prune_msg)
+                    if len(self.telemetry.pruned_branches) > 8:
+                        self.telemetry.pruned_branches.pop(0)
+
+                if step_callback:
+                    step_callback('PRUNED', {
+                        'depth': depth,
+                        'move_str': move_str,
+                        'message': prune_msg
+                    })
+                return value
+
+            beta = min(beta, value)
+
+        return value
