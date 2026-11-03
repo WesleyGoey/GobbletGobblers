@@ -131,6 +131,16 @@ WINNING_LINES_5 = generate_winning_lines(5)
 # Kept for backwards compatibility: default 4-in-a-row lines (28 lines)
 WINNING_LINES = WINNING_LINES_4
 
+# Precomputed cell-to-lines index for O(1) lookup of lines intersecting any cell (r, c)
+CELL_LINES_4: Dict[Tuple[int, int], List[List[Tuple[int, int]]]] = {
+    (r, c): [line for line in WINNING_LINES_4 if (r, c) in line]
+    for r in range(5) for c in range(5)
+}
+CELL_LINES_5: Dict[Tuple[int, int], List[List[Tuple[int, int]]]] = {
+    (r, c): [line for line in WINNING_LINES_5 if (r, c) in line]
+    for r in range(5) for c in range(5)
+}
+
 
 class GameState:
     """Full representation of a 5x5 Gobblet Gobblers game state."""
@@ -139,10 +149,16 @@ class GameState:
         self.win_streak: int = win_streak
         if win_streak == 4:
             self.winning_lines = WINNING_LINES_4
+            self.cell_lines = CELL_LINES_4
         elif win_streak == 5:
             self.winning_lines = WINNING_LINES_5
+            self.cell_lines = CELL_LINES_5
         else:
             self.winning_lines = generate_winning_lines(win_streak)
+            self.cell_lines = {
+                (r, c): [line for line in self.winning_lines if (r, c) in line]
+                for r in range(5) for c in range(5)
+            }
 
         # 5x5 board, each cell is a LIFO list of Piece objects.
         # Bottom piece at index 0, top piece at index -1.
@@ -206,11 +222,15 @@ class GameState:
 
     def clone(self) -> 'GameState':
         """Deep copy of the game state for fast search simulations."""
-        new_state = GameState(win_streak=self.win_streak)
-        new_state.board = [[list(cell) for cell in row] for row in self.board]
-        new_state.covered_turns = [[list(cell) for cell in row] for row in self.covered_turns]
+        new_state = GameState.__new__(GameState)
+        new_state.win_streak = self.win_streak
+        new_state.winning_lines = self.winning_lines
+        new_state.cell_lines = getattr(self, 'cell_lines', None)
+        new_state.board = [[cell.copy() for cell in row] for row in self.board]
+        new_state.covered_turns = [[cell.copy() for cell in row] for row in self.covered_turns]
         new_state.reserves = {
-            p: dict(res) for p, res in self.reserves.items()
+            PLAYER_BLUE: self.reserves[PLAYER_BLUE].copy(),
+            PLAYER_ORANGE: self.reserves[PLAYER_ORANGE].copy()
         }
         new_state.current_player = self.current_player
         new_state.turn_number = self.turn_number
@@ -218,7 +238,7 @@ class GameState:
         new_state.game_over = self.game_over
         new_state.win_reason = self.win_reason
         new_state.winning_line = list(self.winning_line) if self.winning_line else None
-        new_state.move_history = list(self.move_history)
+        new_state.move_history = self.move_history.copy()
         return new_state
 
     def find_all_winning_lines(self) -> Dict[int, List[List[Tuple[int, int]]]]:
@@ -227,15 +247,16 @@ class GameState:
         Returns a dict mapping player -> list of winning lines.
         """
         wins: Dict[int, List[List[Tuple[int, int]]]] = {PLAYER_BLUE: [], PLAYER_ORANGE: []}
+        board = self.board
         for line in self.winning_lines:
-            first_piece = self.get_top_piece(line[0][0], line[0][1])
-            if not first_piece:
+            c0 = board[line[0][0]][line[0][1]]
+            if not c0:
                 continue
-            p = first_piece.player
+            p = c0[-1].player
             match = True
             for r, c in line[1:]:
-                piece = self.get_top_piece(r, c)
-                if not piece or piece.player != p:
+                cell = board[r][c]
+                if not cell or cell[-1].player != p:
                     match = False
                     break
             if match:
@@ -272,25 +293,31 @@ class GameState:
         """
         r, c = from_pos
         cell = self.board[r][c]
-        if not cell:
+        if len(cell) < 2:
             return False, []
 
-        piece = cell.pop()
+        piece = cell[-1]
         opponent = self.get_opponent(piece.player)
+        if cell[-2].player != opponent:
+            return False, []
 
-        # Check all winning lines that contain (r, c)
+        cell.pop()
         opp_lines = []
-        for line in self.winning_lines:
-            if (r, c) in line:
-                colors = []
-                for lr, lc in line:
-                    top = self.get_top_piece(lr, lc)
-                    if top and top.player == opponent:
-                        colors.append(top.player)
-                    else:
-                        break
-                if len(colors) == self.win_streak:
-                    opp_lines.append(line)
+        cell_lines = getattr(self, 'cell_lines', None)
+        relevant_lines = cell_lines[(r, c)] if cell_lines else [line for line in self.winning_lines if (r, c) in line]
+        
+        board = self.board
+        win_streak = self.win_streak
+        for line in relevant_lines:
+            colors_count = 0
+            for lr, lc in line:
+                lcell = board[lr][lc]
+                if lcell and lcell[-1].player == opponent:
+                    colors_count += 1
+                else:
+                    break
+            if colors_count == win_streak:
+                opp_lines.append(line)
 
         cell.append(piece)  # Restore piece
         return (len(opp_lines) > 0), opp_lines
@@ -312,15 +339,22 @@ class GameState:
 
         opponent = self.get_opponent(player)
         legal_moves: List[Move] = []
+        board = self.board
+
+        # Fast pre-extraction of top piece sizes across the 5x5 board
+        top_sizes = [
+            [board[r][c][-1].size if board[r][c] else 0 for c in range(5)]
+            for r in range(5)
+        ]
 
         # 1. Action A: Introduce from Reserve
         reserve = self.reserves[player]
-        for size in [3, 2, 1]:  # Check largest first for optimal ordering
+        for size in (3, 2, 1):  # Check largest first for optimal ordering
             if reserve[size] > 0:
                 for r in range(5):
+                    row_sizes = top_sizes[r]
                     for c in range(5):
-                        top_size = self.get_top_size(r, c)
-                        if top_size < size:
+                        if row_sizes[c] < size:
                             legal_moves.append(Move(
                                 player=player,
                                 move_type='drop',
@@ -331,18 +365,19 @@ class GameState:
         # 2. Action B: Move on Board
         board_moves: List[Move] = []
         for r1 in range(5):
+            row_board = board[r1]
             for c1 in range(5):
-                top_piece = self.get_top_piece(r1, c1)
-                if top_piece and top_piece.player == player:
-                    size = top_piece.size
+                cell = row_board[c1]
+                if cell and cell[-1].player == player:
+                    size = cell[-1].size
                     is_trap, opp_lines = self.would_lift_uncover_opponent_win((r1, c1))
 
                     for r2 in range(5):
+                        row_sizes2 = top_sizes[r2]
                         for c2 in range(5):
                             if (r1, c1) == (r2, c2):
                                 continue
-                            top_size2 = self.get_top_size(r2, c2)
-                            if top_size2 < size:
+                            if row_sizes2[c2] < size:
                                 move = Move(
                                     player=player,
                                     move_type='move',
@@ -352,11 +387,11 @@ class GameState:
                                 )
                                 if is_trap:
                                     # If lifting created an opponent win, this move MUST block all revealed opponent lines!
-                                    p = self.board[r1][c1].pop()
-                                    self.board[r2][c2].append(p)
+                                    p = cell.pop()
+                                    board[r2][c2].append(p)
                                     opp_wins = self.find_all_winning_lines()[opponent]
-                                    self.board[r2][c2].pop()
-                                    self.board[r1][c1].append(p)
+                                    board[r2][c2].pop()
+                                    cell.append(p)
 
                                     if len(opp_wins) == 0:
                                         board_moves.append(move)

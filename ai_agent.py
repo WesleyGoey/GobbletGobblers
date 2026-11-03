@@ -21,6 +21,7 @@ import math
 import threading
 from game_engine import (
     GameState, Piece, Move, WINNING_LINES, WINNING_LINES_4, WINNING_LINES_5,
+    CELL_LINES_4, CELL_LINES_5,
     PLAYER_BLUE, PLAYER_ORANGE, SIZE_SYMBOLS, SIZE_NAMES, PLAYER_NAMES
 )
 
@@ -142,17 +143,48 @@ class AIHeuristic:
         Positive is favorable to ai_player (Orange), negative favorable to human (Blue).
         """
         human_player = PLAYER_BLUE if ai_player == PLAYER_ORANGE else PLAYER_ORANGE
+        board = state.board
 
-        winner, _ = state.check_winner_on_board()
+        # 1. Pre-extract top pieces and top sizes for O(1) direct access
+        top_grid = [[board[r][c][-1] if board[r][c] else None for c in range(5)] for r in range(5)]
+        top_sizes = [[top_grid[r][c].size if top_grid[r][c] else 0 for c in range(5)] for r in range(5)]
+
+        win_target = getattr(state, 'win_streak', 5)
+        winning_lines = WINNING_LINES_5 if win_target == 5 else WINNING_LINES_4
+        cell_lines_dict = CELL_LINES_5 if win_target == 5 else CELL_LINES_4
+
+        # Fast winner check on board
+        blue_wins = []
+        orange_wins = []
+        for line in winning_lines:
+            first = top_grid[line[0][0]][line[0][1]]
+            if not first:
+                continue
+            p = first.player
+            match = True
+            for r, c in line[1:]:
+                top = top_grid[r][c]
+                if not top or top.player != p:
+                    match = False
+                    break
+            if match:
+                (blue_wins if p == PLAYER_BLUE else orange_wins).append(line)
+
+        if blue_wins and not orange_wins:
+            winner = PLAYER_BLUE
+        elif orange_wins and not blue_wins:
+            winner = PLAYER_ORANGE
+        elif blue_wins and orange_wins:
+            winner = state.get_opponent(state.current_player)
+        else:
+            winner = None
+
         if winner == ai_player:
             return 10000.0
         elif winner == human_player:
             return -10000.0
 
         score = 0.0
-        win_target = getattr(state, 'win_streak', 5)
-        winning_lines = getattr(state, 'winning_lines', WINNING_LINES_5 if win_target == 5 else WINNING_LINES_4)
-
         human_res = state.reserves.get(human_player, {})
         ai_res = state.reserves.get(ai_player, {})
         max_human_res_size = max([s for s, cnt in human_res.items() if cnt > 0], default=0)
@@ -167,7 +199,7 @@ class AIHeuristic:
             human_pieces = []
 
             for r, c in line:
-                top = state.get_top_piece(r, c)
+                top = top_grid[r][c]
                 if top is None:
                     empty_count += 1
                 elif top.player == ai_player:
@@ -221,9 +253,9 @@ class AIHeuristic:
                         # 4 human pieces blocked by 1 AI piece: check if human can gobble it!
                         ai_pos_size = ai_pieces[0][2]
                         can_gobble = (max_human_res_size > ai_pos_size) or any(
-                            state.get_top_size(br, bc) > ai_pos_size
+                            top_sizes[br][bc] > ai_pos_size
                             for br in range(5) for bc in range(5)
-                            if (br, bc) not in line and state.get_top_piece(br, bc) and state.get_top_piece(br, bc).player == human_player
+                            if (br, bc) not in line and top_grid[br][bc] and top_grid[br][bc].player == human_player
                         )
                         if can_gobble:
                             score -= 780.0  # Human can gobble this piece and win immediately!
@@ -233,9 +265,9 @@ class AIHeuristic:
                         # 4 AI pieces blocked by 1 human piece: check if AI can gobble it!
                         human_pos_size = human_pieces[0][2]
                         can_gobble = (max_ai_res_size > human_pos_size) or any(
-                            state.get_top_size(br, bc) > human_pos_size
+                            top_sizes[br][bc] > human_pos_size
                             for br in range(5) for bc in range(5)
-                            if (br, bc) not in line and state.get_top_piece(br, bc) and state.get_top_piece(br, bc).player == ai_player
+                            if (br, bc) not in line and top_grid[br][bc] and top_grid[br][bc].player == ai_player
                         )
                         if can_gobble:
                             score += 620.0  # AI can gobble and win on next turn!
@@ -274,93 +306,84 @@ class AIHeuristic:
                         score += diff * 5.0
 
         # 2. Board Positional Advantage (Center control)
-        for r, c in cls.CENTER_CELLS:
-            top = state.get_top_piece(r, c)
-            if top:
-                mult = 1.0 if top.player == ai_player else -1.0
-                score += mult * 35.0
+        top_center = top_grid[2][2]
+        if top_center:
+            score += (35.0 if top_center.player == ai_player else -35.0)
 
         for r, c in cls.INNER_RING:
-            top = state.get_top_piece(r, c)
+            top = top_grid[r][c]
             if top:
-                mult = 1.0 if top.player == ai_player else -1.0
-                score += mult * 15.0
+                score += (15.0 if top.player == ai_player else -15.0)
 
         # 3. Reserve Advantage
         # Large (Size 3) pieces are the most powerful gobblers
-        ai_res = state.reserves[ai_player]
-        human_res = state.reserves[human_player]
+        ai_res = state.reserves.get(ai_player, {})
+        human_res = state.reserves.get(human_player, {})
 
-        res_val_ai = ai_res[3] * 20.0 + ai_res[2] * 10.0 + ai_res[1] * 3.0
-        res_val_human = human_res[3] * 20.0 + human_res[2] * 10.0 + human_res[1] * 3.0
+        res_val_ai = ai_res.get(3, 0) * 20.0 + ai_res.get(2, 0) * 10.0 + ai_res.get(1, 0) * 3.0
+        res_val_human = human_res.get(3, 0) * 20.0 + human_res.get(2, 0) * 10.0 + human_res.get(1, 0) * 3.0
         score += (res_val_ai - res_val_human)
 
         # 4. Trap Risk & Uncover Vulnerability Analysis
         # Evaluates hidden uncover liabilities (pinned AI pieces) and latent traps (human covering AI)
         for r in range(5):
             for c in range(5):
-                stack = state.get_cell_stack(r, c)
-                if len(stack) > 1:
-                    top_piece = stack[-1]
-                    covered_piece = stack[-2]
+                cell = board[r][c]
+                if len(cell) > 1:
+                    top_piece = cell[-1]
+                    covered_piece = cell[-2]
 
                     # Case A: AI piece covers a human piece (Pinned AI piece / Uncover trap risk!)
                     if top_piece.player == ai_player and covered_piece.player == human_player:
-                        for line in winning_lines:
-                            if (r, c) in line:
-                                human_in_line = sum(
-                                    1 for lr, lc in line
-                                    if (lr, lc) != (r, c) and state.get_top_piece(lr, lc) and state.get_top_piece(lr, lc).player == human_player
-                                )
-                                if win_target == 5:
-                                    if human_in_line >= 4:
-                                        # Lifting immediately reveals 5th human piece => instant human win!
-                                        score -= 750.0
-                                    elif human_in_line == 3:
-                                        # Lifting reveals 4-of-5 threat!
-                                        score -= 180.0
-                                    elif human_in_line == 2:
-                                        # Lifting reveals 3-of-5 threat!
-                                        score -= 50.0
-                                    elif human_in_line >= 1:
-                                        score -= 15.0
-                                else:
-                                    if human_in_line == win_target - 1:
-                                        # Lifting this AI piece immediately creates human win!
-                                        score -= 450.0
-                                    elif human_in_line == win_target - 2:
-                                        score -= 90.0
-                                    elif human_in_line >= 1:
-                                        score -= 20.0
+                        for line in cell_lines_dict[(r, c)]:
+                            human_in_line = 0
+                            for lr, lc in line:
+                                if (lr, lc) != (r, c):
+                                    top = top_grid[lr][lc]
+                                    if top and top.player == human_player:
+                                        human_in_line += 1
+                            if win_target == 5:
+                                if human_in_line >= 4:
+                                    score -= 750.0
+                                elif human_in_line == 3:
+                                    score -= 180.0
+                                elif human_in_line == 2:
+                                    score -= 50.0
+                                elif human_in_line >= 1:
+                                    score -= 15.0
+                            else:
+                                if human_in_line == win_target - 1:
+                                    score -= 450.0
+                                elif human_in_line == win_target - 2:
+                                    score -= 90.0
+                                elif human_in_line >= 1:
+                                    score -= 20.0
 
                     # Case B: Human piece covers an AI piece (Latent trap set for human!)
                     elif top_piece.player == human_player and covered_piece.player == ai_player:
-                        for line in winning_lines:
-                            if (r, c) in line:
-                                ai_in_line = sum(
-                                    1 for lr, lc in line
-                                    if (lr, lc) != (r, c) and state.get_top_piece(lr, lc) and state.get_top_piece(lr, lc).player == ai_player
-                                )
-                                if win_target == 5:
-                                    if ai_in_line >= 4:
-                                        # If human lifts, AI immediately gets 5-in-a-row!
-                                        score += 600.0
-                                    elif ai_in_line == 3:
-                                        # If human lifts, AI gets 4-of-5!
-                                        score += 150.0
-                                    elif ai_in_line == 2:
-                                        # If human lifts, AI gets 3-of-5!
-                                        score += 40.0
-                                    elif ai_in_line >= 1:
-                                        score += 10.0
-                                else:
-                                    if ai_in_line == win_target - 1:
-                                        # If human lifts, AI immediately gets win!
-                                        score += 350.0
-                                    elif ai_in_line == win_target - 2:
-                                        score += 80.0
-                                    elif ai_in_line >= 1:
-                                        score += 15.0
+                        for line in cell_lines_dict[(r, c)]:
+                            ai_in_line = 0
+                            for lr, lc in line:
+                                if (lr, lc) != (r, c):
+                                    top = top_grid[lr][lc]
+                                    if top and top.player == ai_player:
+                                        ai_in_line += 1
+                            if win_target == 5:
+                                if ai_in_line >= 4:
+                                    score += 600.0
+                                elif ai_in_line == 3:
+                                    score += 150.0
+                                elif ai_in_line == 2:
+                                    score += 40.0
+                                elif ai_in_line >= 1:
+                                    score += 10.0
+                            else:
+                                if ai_in_line == win_target - 1:
+                                    score += 350.0
+                                elif ai_in_line == win_target - 2:
+                                    score += 80.0
+                                elif ai_in_line >= 1:
+                                    score += 15.0
 
                     # Case C: Friendly stack (AI piece covers AI piece)
                     elif top_piece.player == ai_player and covered_piece.player == ai_player:
@@ -410,6 +433,22 @@ class SearchTelemetry:
     def get_memory_snapshot_copy(self) -> List[Dict[str, Any]]:
         with self.lock:
             return list(self.memory_snapshot)
+
+
+def order_moves_heuristically(moves: List[Move]) -> None:
+    """Fast integer-score move ordering for early alpha-beta cutoffs."""
+    inner_ring = AIHeuristic.INNER_RING
+
+    def move_score(m: Move) -> int:
+        sc = (m.size or 0) * 10
+        to_pos = m.to_pos
+        if to_pos == (2, 2):
+            sc += 5
+        elif to_pos in inner_ring:
+            sc += 2
+        return sc
+
+    moves.sort(key=move_score, reverse=True)
 
 
 class MinimaxAgent:
@@ -466,11 +505,7 @@ class MinimaxAgent:
             return None
 
         # Sort moves heuristically (drops of size 3 first, then center moves)
-        legal_moves.sort(key=lambda m: (
-            m.size if m.size else 0,
-            1 if m.to_pos == (2, 2) else 0,
-            1 if m.to_pos in AIHeuristic.INNER_RING else 0
-        ), reverse=True)
+        order_moves_heuristically(legal_moves)
 
         best_move = legal_moves[0]
         alpha = -math.inf
@@ -594,7 +629,7 @@ class MinimaxAgent:
             return AIHeuristic.evaluate(state, self.player)
 
         # Move ordering heuristic
-        moves.sort(key=lambda m: (m.size if m.size else 0), reverse=True)
+        order_moves_heuristically(moves)
 
         value = -math.inf
         for move in moves:
@@ -678,7 +713,8 @@ class MinimaxAgent:
         if not moves:
             return AIHeuristic.evaluate(state, self.player)
 
-        moves.sort(key=lambda m: (m.size if m.size else 0), reverse=True)
+        # Move ordering heuristic
+        order_moves_heuristically(moves)
 
         value = math.inf
         for move in moves:
