@@ -192,49 +192,67 @@ def test_3_alpha_beta_pruning() -> Dict[str, Any]:
     total_raw_nodes = 0
     total_pruned_nodes = 0
     
-    print(f"{'Skenario':<28} | {'Pure Minimax':<12} | {'Alpha-Beta':<10} | {'Hemat Node':<10} | {'Move Identik?'}")
-    print("-" * 78)
+    print(f"{'Skenario':<26} | {'Pure Minimax':<16} | {'Alpha-Beta':<16} | {'Waktu Terpangkas':<18} | {'Speedup':<8} | {'Move'}")
+    print("-" * 96)
     
+    total_raw_time = 0.0
+    total_ab_time = 0.0
+
     for name, st in scenarios:
         # 1. Pure Minimax (pruning disabled)
         agent_raw = MinimaxAgent(player=PLAYER_ORANGE, max_depth=2, memory_window=5, enable_pruning=False)
         agent_raw.step_delay = 0.0
-        t0 = time.time()
+        t0 = time.perf_counter()
         move_raw = agent_raw.get_action(st.clone())
+        raw_time = (time.perf_counter() - t0) * 1000.0
         raw_nodes = agent_raw.telemetry.nodes_visited
-        raw_time = (time.time() - t0) * 1000.0
         
         # 2. Alpha-Beta Pruning (pruning enabled)
         agent_ab = MinimaxAgent(player=PLAYER_ORANGE, max_depth=2, memory_window=5, enable_pruning=True)
         agent_ab.step_delay = 0.0
-        t1 = time.time()
+        t1 = time.perf_counter()
         move_ab = agent_ab.get_action(st.clone())
+        ab_time = (time.perf_counter() - t1) * 1000.0
         ab_nodes = agent_ab.telemetry.nodes_visited
-        ab_time = (time.time() - t1) * 1000.0
         
         reduction = ((raw_nodes - ab_nodes) / raw_nodes * 100.0) if raw_nodes > 0 else 0.0
+        time_cut = raw_time - ab_time
+        time_cut_pct = (time_cut / raw_time * 100.0) if raw_time > 0 else 0.0
+        speedup = raw_time / ab_time if ab_time > 0 else 1.0
+
         is_same_move = (str(move_raw) == str(move_ab))
         if not is_same_move:
             all_moves_matched = False
             
         total_raw_nodes += raw_nodes
         total_pruned_nodes += ab_nodes
+        total_raw_time += raw_time
+        total_ab_time += ab_time
         
         results.append({
             "name": name,
             "raw_nodes": raw_nodes,
             "ab_nodes": ab_nodes,
             "reduction_pct": reduction,
+            "raw_time": raw_time,
+            "ab_time": ab_time,
+            "time_cut": time_cut,
+            "speedup": speedup,
             "same_move": is_same_move
         })
         
-        print(f"{name:<28} | {raw_nodes:>5} nodes   | {ab_nodes:>5} nodes | {reduction:>7.1f}%   | {'YES (Identik)' if is_same_move else 'NO'}")
+        print(f"{name:<26} | {raw_time:>6.1f}ms ({raw_nodes:>5}n) | {ab_time:>6.1f}ms ({ab_nodes:>5}n) | {time_cut:>6.1f}ms (-{time_cut_pct:4.1f}%) | {speedup:>5.1f}x   | {'100%' if is_same_move else 'MISMATCH'}")
 
     overall_reduction = ((total_raw_nodes - total_pruned_nodes) / total_raw_nodes * 100.0)
+    overall_time_cut = total_raw_time - total_ab_time
+    overall_time_pct = (overall_time_cut / total_raw_time * 100.0) if total_raw_time > 0 else 0.0
+    overall_speedup = total_raw_time / total_ab_time if total_ab_time > 0 else 1.0
     passed = all_moves_matched and (overall_reduction > 30.0)
     
-    print("-" * 78)
-    print(f"Rata-rata Pengurangan Node : {overall_reduction:.1f}%")
+    print("-" * 96)
+    print(f"TOTAL AKUMULASI            | {total_raw_time:>6.1f}ms ({total_raw_nodes:>5}n) | {total_ab_time:>6.1f}ms ({total_pruned_nodes:>5}n) | {overall_time_cut:>6.1f}ms (-{overall_time_pct:4.1f}%) | {overall_speedup:>5.1f}x   | {'COCOK' if all_moves_matched else 'BEDA'}")
+    print(f"Rata-rata Hemat Waktu      : {overall_time_pct:.1f}% ({overall_speedup:.1f}x lebih cepat)")
+    print(f"Rata-rata Hemat Node       : {overall_reduction:.1f}%")
     print(f"Semua Langkah Identik      : {'YA (100% Cocok)' if all_moves_matched else 'TIDAK'}")
     print(f"Hasil Pengujian            : {'BERHASIL' if passed else 'GAGAL'}")
     
