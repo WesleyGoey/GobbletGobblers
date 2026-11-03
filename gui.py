@@ -4,10 +4,69 @@ from game_engine import GameState, Move, PLAYER_BLUE, PLAYER_ORANGE
 
 class PygameGUI:
     def __init__(self, state: GameState):
+        pygame.init()
+        self.screen_width = 1280
+        self.screen_height = 760
+        self.screen = pygame.display.set_mode((self.screen_width, self.screen_height))
+        pygame.display.set_caption("Gobblet Gobblers 5x5 — Team 6 AI")
+
+        # Board layout coordinates
+        self.board_x = 40
+        self.board_y = 100
+        self.board_size = 560
+        self.cell_size = self.board_size // 5
+        self.state = state
+
+        # Selection state for mouse interaction
+        self.selected_reserve_size: Optional[int] = None
+        self.selected_board_pos: Optional[Tuple[int, int]] = None
+
         from ai_agent import MinimaxAgent
         self.ai_agent = MinimaxAgent(player=PLAYER_ORANGE, max_depth=2, memory_window=5)
         self.difficulty_tier = "Medium"
         self.clock = pygame.time.Clock()
+
+    def draw_board(self):
+        """Draw the 5x5 wooden grid canvas and cell borders."""
+        board_rect = pygame.Rect(self.board_x, self.board_y, self.board_size, self.board_size)
+        pygame.draw.rect(self.screen, (45, 35, 25), board_rect, border_radius=12)
+
+        for r in range(5):
+            for c in range(5):
+                cell_rect = pygame.Rect(
+                    self.board_x + c * self.cell_size + 4,
+                    self.board_y + r * self.cell_size + 4,
+                    self.cell_size - 8,
+                    self.cell_size - 8
+                )
+                pygame.draw.rect(self.screen, (60, 48, 36), cell_rect, border_radius=8)
+
+    def draw_piece(self, surface: pygame.Surface, x: int, y: int, player: int, size: int):
+        """Draw a tactile 3D Gobbler figurine with cylindrical shading and expressive eyes."""
+        radius_map = {1: 18, 2: 30, 3: 44}
+        height_map = {1: 28, 2: 44, 3: 60}
+        radius = radius_map[size]
+        height = height_map[size]
+
+        # Colors: Blue (Human) vs Orange (AI)
+        body_color = (40, 140, 255) if player == PLAYER_BLUE else (255, 120, 20)
+        shadow_color = (20, 80, 160) if player == PLAYER_BLUE else (180, 70, 10)
+        highlight_color = (130, 200, 255) if player == PLAYER_BLUE else (255, 180, 90)
+
+        # Base shadow
+        pygame.draw.ellipse(surface, (20, 20, 20), (x - radius, y + height//2 - 6, radius * 2, 14))
+
+        # Cylindrical body
+        rect = pygame.Rect(x - radius, y - height//2, radius * 2, height)
+        pygame.draw.rect(surface, body_color, rect, border_radius=radius)
+        # Highlight top rim
+        pygame.draw.ellipse(surface, highlight_color, (x - radius + 3, y - height//2, radius * 2 - 6, 12))
+
+        # Expressive cartoon eyes
+        eye_y = y - height//4
+        for eye_x in [x - radius//3, x + radius//3]:
+            pygame.draw.circle(surface, (255, 255, 255), (eye_x, eye_y), 5)
+            pygame.draw.circle(surface, (20, 20, 20), (eye_x, eye_y), 2)
 
     def draw_pieces_and_reserves(self):
         """Render all top pieces on the 5x5 board, selection highlights, and bottom reserve tray."""
@@ -66,83 +125,58 @@ class PygameGUI:
             pygame.draw.rect(self.screen, bcol, brect, border_radius=6)
             pygame.draw.rect(self.screen, (120, 140, 170), brect, 1, border_radius=6)
             self.screen.blit(font_btn.render(label, True, (255, 255, 255)), (bx + 14, 675))
-        
-        pygame.init()
-        self.screen_width = 1280
-        self.screen_height = 760
-        self.screen = pygame.display.set_mode((self.screen_width, self.screen_height))
-        pygame.display.set_caption("Gobblet Gobblers 5x5 — Team 6 AI")
-
-        # Board layout coordinates
-        self.board_x = 40
-        self.board_y = 100
-        self.board_size = 560
-        self.cell_size = self.board_size // 5
-        self.state = state
-
-        # Selection state for mouse interaction
-        self.selected_reserve_size: Optional[int] = None
-        self.selected_board_pos: Optional[Tuple[int, int]] = None
-
-    def draw_board(self):
-        """Draw the 5x5 wooden grid canvas and cell borders."""
-        board_rect = pygame.Rect(self.board_x, self.board_y, self.board_size, self.board_size)
-        pygame.draw.rect(self.screen, (45, 35, 25), board_rect, border_radius=12)
-
-        for r in range(5):
-            for c in range(5):
-                cell_rect = pygame.Rect(
-                    self.board_x + c * self.cell_size + 4,
-                    self.board_y + r * self.cell_size + 4,
-                    self.cell_size - 8,
-                    self.cell_size - 8
-                )
-                pygame.draw.rect(self.screen, (60, 48, 36), cell_rect, border_radius=8)
-
-    def draw_piece(self, surface: pygame.Surface, x: int, y: int, player: int, size: int):
-        """Draw a tactile 3D Gobbler figurine with cylindrical shading and expressive eyes."""
-        radius_map = {1: 18, 2: 30, 3: 44}
-        height_map = {1: 28, 2: 44, 3: 60}
-        radius = radius_map[size]
-        height = height_map[size]
-
-        # Colors: Blue (Human) vs Orange (AI)
-        body_color = (40, 140, 255) if player == PLAYER_BLUE else (255, 120, 20)
-        shadow_color = (20, 80, 160) if player == PLAYER_BLUE else (180, 70, 10)
-        highlight_color = (130, 200, 255) if player == PLAYER_BLUE else (255, 180, 90)
-
-        # Base shadow
-        pygame.draw.ellipse(surface, (20, 20, 20), (x - radius, y + height//2 - 6, radius * 2, 14))
-
-        # Cylindrical body
-        rect = pygame.Rect(x - radius, y - height//2, radius * 2, height)
-        pygame.draw.rect(surface, body_color, rect, border_radius=radius)
-        # Highlight top rim
-        pygame.draw.ellipse(surface, highlight_color, (x - radius + 3, y - height//2, radius * 2 - 6, 12))
-
-        # Expressive cartoon eyes
-        eye_y = y - height//4
-        for eye_x in [x - radius//3, x + radius//3]:
-            pygame.draw.circle(surface, (255, 255, 255), (eye_x, eye_y), 5)
-            pygame.draw.circle(surface, (20, 20, 20), (eye_x, eye_y), 2)
 
     def handle_click(self, mouse_pos: Tuple[int, int]):
-        """Handle player mouse clicks for selecting reserves or board relocation."""
+        """Handle player mouse clicks for board cells, reserves, and control buttons."""
         mx, my = mouse_pos
-        # Check if clicked inside board
+
+        # 1. Check Control Buttons (Easy / Medium / Hard / Restart)
+        controls = [("Easy", 660), ("Medium", 755), ("Hard", 850), ("Restart", 960)]
+        for label, bx in controls:
+            if bx <= mx <= bx + 85 and 665 <= my <= 701:
+                if label == "Restart":
+                    self.restart_game(win_streak=self.state.win_streak)
+                else:
+                    self.difficulty_tier = label
+                    self.ai_agent.set_difficulty(label)
+                return
+
+        if self.state.game_over or self.state.current_player != PLAYER_BLUE:
+            return
+
+        # 2. Check Reserve Tray Clicks
+        for idx, sz in enumerate([1, 2, 3]):
+            rx = 290 + idx * 110
+            if rx - 45 <= mx <= rx + 50 and 658 <= my <= 702:
+                if self.state.reserves[PLAYER_BLUE][sz] > 0:
+                    self.selected_reserve_size = sz
+                    self.selected_board_pos = None
+                return
+
+        # 3. Check 5x5 Board Clicks
         if self.board_x <= mx <= self.board_x + self.board_size and self.board_y <= my <= self.board_y + self.board_size:
             col = (mx - self.board_x) // self.cell_size
             row = (my - self.board_y) // self.cell_size
             self.on_cell_clicked(row, col)
 
     def on_cell_clicked(self, r: int, c: int):
+        """Execute drop from reserve or board-to-board gobble/relocation."""
         if self.selected_reserve_size is not None:
-            # Place selected reserve piece
             move = Move(self.state.current_player, 'drop', to_pos=(r, c), size=self.selected_reserve_size)
             if self.state.apply_move(move):
                 self.selected_reserve_size = None
+        elif self.selected_board_pos is not None:
+            if self.selected_board_pos == (r, c):
+                self.selected_board_pos = None
+                return
+            move = Move(self.state.current_player, 'move', from_pos=self.selected_board_pos, to_pos=(r, c))
+            if self.state.apply_move(move):
+                self.selected_board_pos = None
+            else:
+                top = self.state.get_top_piece(r, c)
+                if top and top.player == self.state.current_player:
+                    self.selected_board_pos = (r, c)
         else:
-            # Select piece on board to move
             top = self.state.get_top_piece(r, c)
             if top and top.player == self.state.current_player:
                 self.selected_board_pos = (r, c)
@@ -242,3 +276,35 @@ class PygameGUI:
         pygame.draw.lines(glow_surf, (255, 215, 0, 180), False, coords, 14)
         pygame.draw.lines(glow_surf, (255, 255, 255, 240), False, coords, 6)
         self.screen.blit(glow_surf, (0, 0))
+
+    def run(self):
+        """Main interactive Pygame loop running at 60 FPS."""
+        from ai_agent import MemoryInspector
+        running = True
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    self.handle_click(event.pos)
+
+            # Render full frame
+            self.screen.fill((18, 22, 28))
+            self.draw_board()
+            self.draw_pieces_and_reserves()
+            self.draw_sidebar_container()
+            self.draw_ai_decision_feed(self.ai_agent)
+            mem_records = MemoryInspector.get_memory_snapshot(self.state, self.ai_agent.memory_window)
+            self.draw_memory_window_inspector(mem_records)
+            self.draw_winning_glow()
+            pygame.display.flip()
+
+            # Execute AI Turn if active
+            if not self.state.game_over and self.state.current_player == PLAYER_ORANGE:
+                pygame.time.delay(250)
+                ai_move = self.ai_agent.get_best_move(self.state)
+                if ai_move:
+                    self.state.apply_move(ai_move)
+
+            self.clock.tick(60)
+        pygame.quit()
