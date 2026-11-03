@@ -75,6 +75,9 @@ DIFFICULTY_CONFIGS = {
     "easy": {
         "depth": 1,
         "memory_window": 3,
+        "search_budget_ratio": 0.5,
+        "time_limit": 0.05,
+        "evaluation_noise": 120.0,
         "label": "[DIFFICULTY] EASY",
         "color": COLOR_GREEN_ACCENT,
         "bg": (20, 36, 28),
@@ -208,7 +211,10 @@ class GobbletGUI:
             player=PLAYER_ORANGE,
             max_depth=self.ai_depth,
             memory_window=self.memory_window,
-            telemetry=self.telemetry
+            telemetry=self.telemetry,
+            time_limit=diff_cfg.get("time_limit"),
+            search_budget_ratio=diff_cfg.get("search_budget_ratio", 1.0),
+            evaluation_noise=diff_cfg.get("evaluation_noise", 0.0),
         )
         self.agent.step_delay = self.speed_delays[self.ai_speed_mode]
 
@@ -242,9 +248,7 @@ class GobbletGUI:
 
         # Unified Control Bar Buttons: [RESET] NEW GAME, [GOAL] 5-IN-A-ROW, [DIFFICULTY] LEVEL
         self.btn_new_game = pygame.Rect(140, 646, 152, 42)
-        self.btn_goal = pygame.Rect(304, 646, 152, 42)
-        self.btn_win_streak = self.btn_goal  # Alias for backward compatibility
-        self.btn_difficulty = pygame.Rect(468, 646, 152, 42)
+        self.btn_difficulty = pygame.Rect(304, 646, 152, 42)
 
         # Visualization Panel Bounds
         self.panel_rect = pygame.Rect(750, 20, 550, 820)
@@ -306,6 +310,9 @@ class GobbletGUI:
         self.memory_window = cfg["memory_window"]
         self.agent.max_depth = self.ai_depth
         self.agent.memory_window = self.memory_window
+        self.agent.time_limit = cfg.get("time_limit")
+        self.agent.search_budget_ratio = cfg.get("search_budget_ratio", 1.0)
+        self.agent.evaluation_noise = cfg.get("evaluation_noise", 0.0)
         with self.telemetry.lock:
             self.telemetry.max_depth = self.ai_depth
             self.telemetry.memory_snapshot = MemoryInspector.get_memory_snapshot(
@@ -399,11 +406,6 @@ class GobbletGUI:
         # Check Button Clicks first
         if self.btn_new_game.collidepoint(pos):
             self.reset_game()
-            return
-
-        if self.btn_goal.collidepoint(pos):
-            self.win_streak = 5
-            self.status_message = "Goal is fixed to 5-in-a-row."
             return
 
         if self.btn_difficulty.collidepoint(pos):
@@ -762,8 +764,12 @@ class GobbletGUI:
         self.status_message = ""
         self.telemetry.reset()
         self.telemetry.max_depth = self.ai_depth
+        cfg = DIFFICULTY_CONFIGS[self.difficulty]
         self.agent.max_depth = self.ai_depth
         self.agent.memory_window = self.memory_window
+        self.agent.time_limit = cfg.get("time_limit")
+        self.agent.search_budget_ratio = cfg.get("search_budget_ratio", 1.0)
+        self.agent.evaluation_noise = cfg.get("evaluation_noise", 0.0)
         self.ai_thinking = False
         self.pending_ai_move = None
         while not self.event_queue.empty():

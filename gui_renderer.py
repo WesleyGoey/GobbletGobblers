@@ -734,22 +734,7 @@ class BoardRenderer:
         lbl1 = self.text_cache.render(gui.font_btn, "[RESET] NEW GAME", gui.COLOR_TEXT_WHITE)
         screen.blit(lbl1, (gui.btn_new_game.centerx - lbl1.get_width() // 2, gui.btn_new_game.centery - lbl1.get_height() // 2))
 
-        # 2. Goal Toggle Button
-        hov_goal = gui.btn_goal.collidepoint(mouse_pos)
-        hov_goal_val = gui.get_hover("btn_goal", hov_goal)
-        bg_goal = lerp_color((36, 32, 26), (60, 54, 40), hov_goal_val)
-        border_goal = lerp_color((80, 70, 48), gui.COLOR_SELECTED_GLOW, hov_goal_val)
-        pygame.draw.rect(screen, bg_goal, gui.btn_goal, border_radius=8)
-        pygame.draw.rect(screen, border_goal, gui.btn_goal, 1, border_radius=8)
-        top_line_goal = lerp_color((55, 48, 34), (110, 96, 60), hov_goal_val)
-        pygame.draw.line(screen, top_line_goal,
-                         (gui.btn_goal.left + 4, gui.btn_goal.top + 2),
-                         (gui.btn_goal.right - 4, gui.btn_goal.top + 2), 1)
-        lbl_goal_text = f"[GOAL] {gui.win_streak}-IN-A-ROW"
-        lbl_goal = self.text_cache.render(gui.font_btn, lbl_goal_text, gui.COLOR_TEXT_HIGHLIGHT)
-        screen.blit(lbl_goal, (gui.btn_goal.centerx - lbl_goal.get_width() // 2, gui.btn_goal.centery - lbl_goal.get_height() // 2))
-
-        # 3. Difficulty Button
+        # 2. Difficulty Button
         hov_diff = gui.btn_difficulty.collidepoint(mouse_pos)
         hov_diff_val = gui.get_hover("btn_difficulty", hov_diff)
         diff_cfg = gui.DIFFICULTY_CONFIGS[gui.difficulty]

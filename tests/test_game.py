@@ -381,17 +381,14 @@ class TestGobbletGameEngine(unittest.TestCase):
         Serves as the deprecation and validation guard test for 4-in-a-row rejection.
 
         Ensures that obsolete 4-in-a-row streak arguments are rejected with `ValueError`
-        across all entrypoints: `GameState(win_streak=4)`, `generate_winning_lines(4)`,
-        `run_cli_match(win_streak=4)`, and `get_default_scenarios(win_streak=4)`.
+        across entrypoints: `GameState(win_streak=4)`, `generate_winning_lines(4)`,
+        and `get_default_scenarios(win_streak=4)`.
         """
-        from main import run_cli_match
         from run_experiments import get_default_scenarios
         with self.assertRaises(ValueError):
             GameState(win_streak=4)
         with self.assertRaises(ValueError):
             generate_winning_lines(4)
-        with self.assertRaises(ValueError):
-            run_cli_match(win_streak=4)
         with self.assertRaises(ValueError):
             get_default_scenarios(win_streak=4)
 

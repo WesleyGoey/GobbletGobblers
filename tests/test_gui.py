@@ -233,32 +233,6 @@ class TestGobbletGUI(unittest.TestCase):
         self.assertEqual(self.gui.state.winner, PLAYER_ORANGE)
         self.assertIn("Uncover Trap", self.gui.state.win_reason)
 
-    def test_gui_goal_toggle_button(self):
-        """
-        Serves as the goal button immutability test in the GUI control bar.
-
-        Verifies that clicking `btn_goal` maintains the fixed 5-in-a-row winning condition:
-        - Confirms that `win_streak` remains 5 and winning lines count remains 12.
-        - Verifies that clicking the button does not inadvertently reset an ongoing match
-          (advances `turn_number` to 4 and confirms it remains 4).
-        - Verifies that a status message explaining the fixed 5-in-a-row rule is posted.
-        """
-        # Initial goal is 5-in-a-row (default)
-        self.assertEqual(self.gui.win_streak, 5)
-        self.assertEqual(self.gui.state.win_streak, 5)
-        self.assertEqual(len(self.gui.state.winning_lines), 12)
-
-        # Make a move
-        self.gui.state.turn_number = 4
-
-        # Click Goal button -> remains 5-in-a-row (4-in-a-row stripped out), active game not reset
-        self.gui.handle_mouse_click(self.gui.btn_goal.center)
-        self.assertEqual(self.gui.win_streak, 5)
-        self.assertEqual(self.gui.state.win_streak, 5)
-        self.assertEqual(len(self.gui.state.winning_lines), 12)
-        self.assertEqual(self.gui.state.turn_number, 4)
-        self.assertIn("fixed to 5-in-a-row", self.gui.status_message)
-
     def test_gui_init_with_custom_win_streak(self):
         """
         Serves as the constructor win streak parameter guard and validation test.
@@ -366,49 +340,6 @@ class TestGobbletGUI(unittest.TestCase):
         self.gui.state.winning_line = [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4)]
         self.gui.draw()
         self.assertIsNotNone(self.gui.screen)
-
-    def test_main_cli_arguments(self):
-        """
-        Serves as the CLI argument parsing integration test for main.py.
-
-        Executes `python3 main.py` in subprocesses to verify:
-        - `--help` displays `--difficulty` options (easy, medium, hard).
-        - CLI simulation accepts `--difficulty easy` and logs depth 1.
-        - CLI simulation accepts `--difficulty hard` and logs depth 3.
-        - CLI rejects `--goal 4` with an invalid choice exit error.
-        """
-        import subprocess
-        # Test help includes --difficulty
-        res = subprocess.run(["python3", "main.py", "--help"], capture_output=True, text=True)
-        self.assertEqual(res.returncode, 0)
-        self.assertIn("--difficulty", res.stdout)
-        self.assertIn("easy", res.stdout)
-        self.assertIn("medium", res.stdout)
-        self.assertIn("hard", res.stdout)
-
-        # Test CLI mode simulation with --difficulty easy
-        res_easy = subprocess.run(
-            ["python3", "main.py", "--cli", "--difficulty", "easy", "--goal", "5", "--max-turns", "1"],
-            capture_output=True, text=True
-        )
-        self.assertEqual(res_easy.returncode, 0)
-        self.assertIn("Difficulty: EASY (Depth 1, Memory Window 3)", res_easy.stdout)
-
-        # Test CLI mode simulation with --difficulty hard
-        res_hard = subprocess.run(
-            ["python3", "main.py", "--cli", "--difficulty", "hard", "--goal", "5", "--max-turns", "1"],
-            capture_output=True, text=True
-        )
-        self.assertEqual(res_hard.returncode, 0)
-        self.assertIn("Difficulty: HARD (Depth 3, Memory Window 8)", res_hard.stdout)
-
-        # Test CLI rejects --goal 4
-        res_goal4 = subprocess.run(
-            ["python3", "main.py", "--cli", "--goal", "4"],
-            capture_output=True, text=True
-        )
-        self.assertNotEqual(res_goal4.returncode, 0)
-        self.assertIn("invalid choice", res_goal4.stderr)
 
     def test_gui_difficulty_rendering_all_levels(self):
         """
@@ -529,31 +460,6 @@ class TestGobbletGUI(unittest.TestCase):
             self.gui.chosen_move_timer = 0  # Force immediate application
             self.gui.process_ai_queue()
         self.assertEqual(self.gui.state.turn_number, 3)
-
-    def test_main_cli_arguments_with_depth_override(self):
-        """
-        Serves as the CLI depth override option integration test.
-
-        Executes `main.py --cli --difficulty medium --depth 1` in a subprocess.
-        Validates that the explicit `--depth 1` flag overrides the preset default (depth 2),
-        verifying flexibility in automated test scripting and benchmarking.
-        """
-        import subprocess
-        # Test CLI mode simulation with default medium difficulty
-        res_med = subprocess.run(
-            ["python3", "main.py", "--cli", "--difficulty", "medium", "--goal", "5", "--max-turns", "1"],
-            capture_output=True, text=True
-        )
-        self.assertEqual(res_med.returncode, 0)
-        self.assertIn("Difficulty: MEDIUM (Depth 2, Memory Window 5)", res_med.stdout)
-
-        # Test CLI mode simulation with --depth override
-        res_override = subprocess.run(
-            ["python3", "main.py", "--cli", "--difficulty", "medium", "--depth", "1", "--goal", "5", "--max-turns", "1"],
-            capture_output=True, text=True
-        )
-        self.assertEqual(res_override.returncode, 0)
-        self.assertIn("Difficulty: MEDIUM (Depth 1, Memory Window 5)", res_override.stdout)
 
 
 if __name__ == '__main__':

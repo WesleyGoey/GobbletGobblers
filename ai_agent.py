@@ -27,51 +27,6 @@ from game_engine import (
 )
 
 
-class RandomPlayer:
-    """
-    Simulated baseline opponent ('Pemain Acak') that selects legal moves uniformly at random.
-    Used for baseline benchmarking, simulation matches, and testing.
-    """
-
-    def __init__(self, player: int = PLAYER_BLUE, seed: Optional[int] = None):
-        """
-        Initializes the random baseline agent with player color and random seed.
-
-        Parameters:
-            player: The player color assignment (PLAYER_BLUE or PLAYER_ORANGE).
-            seed: Optional integer seed for deterministic pseudo-random action choices.
-        """
-        self.player = player
-        self.rng = random.Random(seed)
-
-    def get_action(
-        self,
-        state: GameState,
-        step_callback: Optional[Callable[[str, Any], None]] = None,
-        cancel_event: Optional[threading.Event] = None
-    ) -> Optional[Move]:
-        """
-        Selects a legal move uniformly at random from available actions.
-
-        Acts as the benchmark opponent ('Pemain Acak') without heuristic evaluation
-        or game tree search. Respects cancellation signals if provided.
-
-        Parameters:
-            state: The current GameState of the match.
-            step_callback: Optional callback for telemetry events (unused by random agent).
-            cancel_event: Optional threading.Event to abort search early if flagged.
-
-        Returns:
-            A randomly selected Move object, or None if no legal moves exist.
-        """
-        legal_moves = state.get_legal_moves(self.player)
-        return self.rng.choice(legal_moves) if legal_moves else None
-
-
-# Backward-compatibility alias
-RandomAgent = RandomPlayer
-
-
 class MemoryInspector:
     """Tracks and reports what the AI remembers vs what it has forgotten."""
 
@@ -459,6 +414,7 @@ class SearchTelemetry:
             self.prune_count: int = 0
             self.start_time: float = 0.0
             self.elapsed_time: float = 0.0
+            self.time_budget_exceeded: bool = False
 
             # Tree logs and candidate moves
             self.candidate_scores: Dict[str, float] = {}  # move_str -> score
@@ -565,7 +521,11 @@ class MinimaxAgent:
         max_depth: int = 3,
         memory_window: int = 5,
         telemetry: Optional[SearchTelemetry] = None,
-        enable_pruning: bool = True
+        enable_pruning: bool = True,
+        time_limit: Optional[float] = None,
+        search_budget_ratio: float = 1.0,
+        evaluation_noise: float = 0.0,
+        seed: Optional[int] = None
     ):
         """
         Initializes the Minimax AI Agent with Alpha-Beta pruning and bounded rationality.
@@ -583,7 +543,17 @@ class MinimaxAgent:
         self.memory_window = memory_window
         self.telemetry = telemetry if telemetry is not None else SearchTelemetry()
         self.enable_pruning = enable_pruning
+        self.time_limit: Optional[float] = time_limit
+        self.search_budget_ratio: float = search_budget_ratio
+        self.evaluation_noise: float = evaluation_noise
+        self.rng = random.Random(seed)
         self.step_delay: float = 0.005  # Slight throttle for visually satisfying live updates
+
+    def _is_time_up(self) -> bool:
+        """Checks whether the configured wall-clock search time limit has expired."""
+        if self.time_limit is not None and self.telemetry.start_time > 0:
+            return (time.time() - self.telemetry.start_time) >= self.time_limit
+        return False
 
     def get_action(
         self,
@@ -633,8 +603,22 @@ class MinimaxAgent:
             self.telemetry.is_searching = False
             return None
 
-        # Sort moves heuristically (drops of size 3 first, then center moves)
-        order_moves_heuristically(legal_moves)
+        is_handicapped = (
+            self.search_budget_ratio < 1.0
+            or self.evaluation_noise > 0.0
+            or self.time_limit is not None
+        )
+        if is_handicapped:
+            # Handicapped AI scans moves in random order and only evaluates a fraction of them
+            self.rng.shuffle(legal_moves)
+            if 0.0 < self.search_budget_ratio < 1.0:
+                max_candidates = max(1, int(math.ceil(len(legal_moves) * self.search_budget_ratio)))
+            else:
+                max_candidates = len(legal_moves)
+        else:
+            # Sort moves heuristically (drops of size 3 first, then center moves)
+            order_moves_heuristically(legal_moves)
+            max_candidates = len(legal_moves)
 
         best_move = legal_moves[0]
         alpha = -math.inf
@@ -642,11 +626,22 @@ class MinimaxAgent:
         best_score = -math.inf
 
         # Root level search
-        for move in legal_moves:
+        for idx, move in enumerate(legal_moves):
             if cancel_event and cancel_event.is_set():
                 with self.telemetry.lock:
                     self.telemetry.is_searching = False
                 return None
+
+            if idx > 0 and (idx >= max_candidates or self._is_time_up()):
+                cutoff_msg = f"[TIME CUTOFF] Search halted early ({idx}/{len(legal_moves)} moves evaluated)"
+                with self.telemetry.lock:
+                    self.telemetry.time_budget_exceeded = True
+                    self.telemetry.pruned_branches.append(cutoff_msg)
+                    if len(self.telemetry.pruned_branches) > 8:
+                        self.telemetry.pruned_branches.pop(0)
+                if step_callback:
+                    step_callback('TIME_CUTOFF', {'evaluated': idx, 'total': len(legal_moves), 'message': cutoff_msg})
+                break
 
             move_str = str(move)
             with self.telemetry.lock:
@@ -684,6 +679,9 @@ class MinimaxAgent:
                 with self.telemetry.lock:
                     self.telemetry.is_searching = False
                 return None
+
+            if self.evaluation_noise > 0.0:
+                score += self.rng.uniform(-self.evaluation_noise, self.evaluation_noise)
 
             with self.telemetry.lock:
                 self.telemetry.candidate_scores[move_str] = round(score, 1)
@@ -784,6 +782,8 @@ class MinimaxAgent:
         for move in moves:
             if cancel_event and cancel_event.is_set():
                 return 0.0
+            if self._is_time_up():
+                break
 
             move_str = str(move)
             new_path = path + [move_str]
@@ -825,7 +825,7 @@ class MinimaxAgent:
 
             alpha = max(alpha, value)
 
-        return value
+        return value if value != -math.inf else AIHeuristic.evaluate(state, self.player)
 
     def _min_value(
         self,
@@ -889,6 +889,8 @@ class MinimaxAgent:
         for move in moves:
             if cancel_event and cancel_event.is_set():
                 return 0.0
+            if self._is_time_up():
+                break
 
             move_str = str(move)
             new_path = path + [move_str]
@@ -930,4 +932,4 @@ class MinimaxAgent:
 
             beta = min(beta, value)
 
-        return value
+        return value if value != math.inf else AIHeuristic.evaluate(state, self.player)

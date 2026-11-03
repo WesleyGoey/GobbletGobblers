@@ -78,11 +78,6 @@ pip install pygame
 python main.py
 ```
 
-### Run Simulation Match in CLI (Headless)
-```bash
-python main.py --cli
-```
-
 ### Run Table 3 Empirical Benchmark (Pure Minimax vs Alpha-Beta Pruning)
 ```bash
 python run_experiments.py
