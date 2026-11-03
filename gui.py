@@ -4,6 +4,69 @@ from game_engine import GameState, Move, PLAYER_BLUE, PLAYER_ORANGE
 
 class PygameGUI:
     def __init__(self, state: GameState):
+        from ai_agent import MinimaxAgent
+        self.ai_agent = MinimaxAgent(player=PLAYER_ORANGE, max_depth=2, memory_window=5)
+        self.difficulty_tier = "Medium"
+        self.clock = pygame.time.Clock()
+
+    def draw_pieces_and_reserves(self):
+        """Render all top pieces on the 5x5 board, selection highlights, and bottom reserve tray."""
+        font_hdr = pygame.font.SysFont("Arial", 22, bold=True)
+        font_btn = pygame.font.SysFont("Arial", 14, bold=True)
+
+        # Top Status Bar
+        if self.state.game_over:
+            status_txt = f"GAME OVER — PLAYER {self.state.winner} WINS! ({self.state.win_reason})"
+            status_col = (255, 215, 0)
+        else:
+            turn_str = "HUMAN (BLUE)" if self.state.current_player == PLAYER_BLUE else "AI THINKING (ORANGE)..."
+            status_txt = f"TURN {self.state.turn_number}: {turn_str}  |  Difficulty: {self.difficulty_tier}"
+            status_col = (100, 200, 255) if self.state.current_player == PLAYER_BLUE else (255, 160, 60)
+        self.screen.blit(font_hdr.render(status_txt, True, status_col), (40, 45))
+
+        # Draw pieces on the 5x5 grid
+        for r in range(5):
+            for c in range(5):
+                cx = self.board_x + c * self.cell_size + self.cell_size // 2
+                cy = self.board_y + r * self.cell_size + self.cell_size // 2
+                if self.selected_board_pos == (r, c):
+                    sel_rect = pygame.Rect(
+                        self.board_x + c * self.cell_size + 4,
+                        self.board_y + r * self.cell_size + 4,
+                        self.cell_size - 8,
+                        self.cell_size - 8
+                    )
+                    pygame.draw.rect(self.screen, (255, 215, 0), sel_rect, 3, border_radius=8)
+                top = self.state.get_top_piece(r, c)
+                if top:
+                    self.draw_piece(self.screen, cx, cy, top.player, top.size)
+
+        # Draw Blue Reserve Tray (Bottom Left)
+        tray_y = 680
+        self.screen.blit(font_btn.render("YOUR RESERVES (Click to Select):", True, (200, 220, 240)), (40, tray_y - 10))
+        size_labels = {1: "Small (S)", 2: "Medium (M)", 3: "Large (L)"}
+        for idx, sz in enumerate([1, 2, 3]):
+            rx = 290 + idx * 110
+            ry = tray_y
+            count = self.state.reserves[PLAYER_BLUE][sz]
+            btn_rect = pygame.Rect(rx - 45, ry - 22, 95, 44)
+            is_sel = (self.selected_reserve_size == sz)
+            bg_col = (40, 90, 160) if is_sel else (35, 42, 55)
+            pygame.draw.rect(self.screen, bg_col, btn_rect, border_radius=8)
+            pygame.draw.rect(self.screen, (255, 215, 0) if is_sel else (80, 100, 130), btn_rect, 2, border_radius=8)
+            lbl = f"{size_labels[sz]}: {count}"
+            self.screen.blit(font_btn.render(lbl, True, (240, 245, 250)), (rx - 38, ry - 8))
+
+        # Draw Control Buttons (Bottom Right inside Sidebar)
+        controls = [("Easy", 660), ("Medium", 755), ("Hard", 850), ("Restart", 960)]
+        for label, bx in controls:
+            brect = pygame.Rect(bx, 665, 85, 36)
+            active = (label == self.difficulty_tier)
+            bcol = (200, 100, 20) if active else (45, 55, 70)
+            pygame.draw.rect(self.screen, bcol, brect, border_radius=6)
+            pygame.draw.rect(self.screen, (120, 140, 170), brect, 1, border_radius=6)
+            self.screen.blit(font_btn.render(label, True, (255, 255, 255)), (bx + 14, 675))
+        
         pygame.init()
         self.screen_width = 1280
         self.screen_height = 760
