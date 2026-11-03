@@ -1,77 +1,93 @@
-from game_engine import GameState, Move, PLAYER_BLUE, PLAYER_ORANGE, SIZE_SYMBOLS
+"""
+main.py - Entry point for 5x5 Gobblet Gobblers.
 
-def render_board_cli(state: GameState):
-    """Draw a clean 5x5 ASCII grid in the terminal displaying top pieces and stack depth."""
-    print("\n" + "=" * 55)
-    print(f" TURN {state.turn_number}: Player {state.current_player}'s Turn")
-    print("=" * 55)
-    print("     0      1      2      3      4  ")
-    print("  +------+------+------+------+------+")
-    for r in range(5):
-        row_str = f"{r} |"
-        for c in range(5):
-            stack = state.get_cell_stack(r, c)
-            if not stack:
-                cell_repr = "  .   "
-            else:
-                top = stack[-1]
-                depth = len(stack)
-                color = "B" if top.player == PLAYER_BLUE else "O"
-                cell_repr = f" {color}{SIZE_SYMBOLS[top.size]}(d{depth})"
-            row_str += cell_repr + "|"
-        print(row_str)
-        print("  +------+------+------+------+------+")
-    
-    # Print reserves
-    b_res = state.reserves[PLAYER_BLUE]
-    o_res = state.reserves[PLAYER_ORANGE]
-    print(f"Blue Reserves  : L:{b_res[3]}  M:{b_res[2]}  S:{b_res[1]}")
-    print(f"Orange Reserves: L:{o_res[3]}  M:{o_res[2]}  S:{o_res[1]}")
-    print("=" * 55 + "\n")
+Usage:
+  python main.py          # Launches full Pygame GUI with interactive board & live AI panel
+  python main.py --cli    # Runs a quick CLI simulation game (AI vs AI or test)
+"""
 
+import sys
 import argparse
+from typing import Optional
+from game_engine import GameState, PLAYER_BLUE, PLAYER_ORANGE, PLAYER_NAMES
 from ai_agent import MinimaxAgent
 
-def run_cli_match(win_streak: int = 5, difficulty: str = "Medium", max_turns: int = 40):
-    """Run an automated terminal simulation match between two AI agents."""
+
+DIFFICULTY_MAP = {
+    'easy': {'depth': 1, 'memory_window': 3},
+    'medium': {'depth': 2, 'memory_window': 5},
+    'hard': {'depth': 3, 'memory_window': 8},
+}
+
+
+def run_cli_match(win_streak: int = 5, difficulty: str = "medium", depth: Optional[int] = None, max_turns: int = 40):
+    diff = difficulty.lower() if isinstance(difficulty, str) and difficulty.lower() in DIFFICULTY_MAP else "medium"
+    cfg = DIFFICULTY_MAP[diff]
+    search_depth = depth if depth is not None else cfg['depth']
+    mem_win = cfg['memory_window']
+
+    print("=" * 60)
+    print(f" Gobblet Gobblers 5x5 - CLI Simulation Match ({win_streak}-in-a-row)")
+    print(f" Difficulty: {diff.upper()} (Depth {search_depth}, Memory Window {mem_win})")
+    print(" Player 1 (Blue) vs Player 2 (Orange AI)")
+    print("=" * 60)
+
     state = GameState(win_streak=win_streak)
-    blue_ai = MinimaxAgent(player=PLAYER_BLUE)
-    orange_ai = MinimaxAgent(player=PLAYER_ORANGE)
-    blue_ai.set_difficulty(difficulty)
-    orange_ai.set_difficulty(difficulty)
+    blue_agent = MinimaxAgent(player=PLAYER_BLUE, max_depth=search_depth, memory_window=mem_win)
+    orange_agent = MinimaxAgent(player=PLAYER_ORANGE, max_depth=search_depth, memory_window=mem_win)
+    blue_agent.step_delay = 0
+    orange_agent.step_delay = 0
 
-    render_board_cli(state)
     while not state.game_over and state.turn_number <= max_turns:
-        agent = blue_ai if state.current_player == PLAYER_BLUE else orange_ai
-        move = agent.get_best_move(state)
-        if not move:
-            break
-        print(f"Action executed: {move}")
-        state.apply_move(move)
-        render_board_cli(state)
+        active_p = state.current_player
+        agent = blue_agent if active_p == PLAYER_BLUE else orange_agent
+        p_name = PLAYER_NAMES[active_p]
 
+        print(f"\n--- Turn {state.turn_number}: {p_name} ---")
+        move = agent.get_action(state)
+        if not move:
+            print(f"No legal moves for {p_name}! Match ends.")
+            break
+
+        print(f"Action: {move}")
+        state.apply_move(move)
+
+        # Print current visible board
+        for r in range(5):
+            row_str = " | ".join(str(state.get_top_piece(r, c) or "  .  ") for c in range(5))
+            print(f"  [{row_str}]")
+
+    print("\n" + "=" * 60)
     if state.game_over:
-        print(f"MATCH FINISHED! Winner: Player {state.winner} ({state.win_reason})")
+        print(f"GAME OVER! Winner: {PLAYER_NAMES[state.winner]}")
+        print(f"Reason: {state.win_reason}")
     else:
         print("Match reached turn limit without a winner.")
+    print("=" * 60)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Gobblet Gobblers 5x5 — Team 6 AI")
-    parser.add_argument("--cli", action="store_true", help="Run match in terminal CLI mode")
-    parser.add_argument("--difficulty", default="Medium", choices=["Easy", "Medium", "Hard"], help="AI Difficulty Tier")
-    parser.add_argument("--goal", type=int, default=5, choices=[4, 5], help="Win streak length (4 or 5)")
+    parser = argparse.ArgumentParser(description="5x5 Gobblet Gobblers with Minimax & Bounded Rationality")
+    parser.add_argument("--cli", action="store_true", help="Run simulation match in CLI mode")
+    parser.add_argument("--difficulty", choices=["easy", "medium", "hard"], default="medium",
+                        help="AI difficulty level: easy (Depth 1, Memory 3), medium (Depth 2, Memory 5), hard (Depth 3, Memory 8)")
+    parser.add_argument("--depth", type=int, default=None, help="Override AI Minimax search depth")
+    parser.add_argument("--goal", "--win-streak", dest="goal", type=int, choices=[4, 5], default=5,
+                        help="Win streak condition: 5-in-a-row (default) or 4-in-a-row")
+    parser.add_argument("--max-turns", type=int, default=40, help="Maximum turns for CLI simulation match (default: 40)")
     args = parser.parse_args()
 
     if args.cli:
-        run_cli_match(win_streak=args.goal, difficulty=args.difficulty)
+        run_cli_match(win_streak=args.goal, difficulty=args.difficulty, depth=args.depth, max_turns=args.max_turns)
     else:
-        from gui import PygameGUI
-        state = GameState(win_streak=args.goal)
-        app = PygameGUI(state)
-        app.difficulty_tier = args.difficulty
-        app.ai_agent.set_difficulty(args.difficulty)
-        app.run()
+        # Launch Pygame GUI
+        from gui import GobbletGUI
+        gui = GobbletGUI(win_streak=args.goal, difficulty=args.difficulty)
+        if args.depth is not None:
+            gui.ai_depth = args.depth
+            gui.agent.max_depth = args.depth
+            gui.telemetry.max_depth = args.depth
+        gui.run()
 
 
 if __name__ == "__main__":
