@@ -462,12 +462,14 @@ class MinimaxAgent:
         player: int = PLAYER_ORANGE,
         max_depth: int = 3,
         memory_window: int = 5,
-        telemetry: Optional[SearchTelemetry] = None
+        telemetry: Optional[SearchTelemetry] = None,
+        enable_pruning: bool = True
     ):
         self.player = player
         self.max_depth = max_depth
         self.memory_window = memory_window
         self.telemetry = telemetry if telemetry is not None else SearchTelemetry()
+        self.enable_pruning = enable_pruning
         self.step_delay: float = 0.005  # Slight throttle for visually satisfying live updates
 
     def get_action(
@@ -658,7 +660,7 @@ class MinimaxAgent:
             )
             value = max(value, v)
 
-            if value >= beta:
+            if self.enable_pruning and value >= beta:
                 prune_msg = f"[PRUNED] at d={depth}: {move_str} (score {value:.1f} >= beta {beta:.1f})"
                 with self.telemetry.lock:
                     self.telemetry.prune_count += 1
@@ -743,7 +745,7 @@ class MinimaxAgent:
             )
             value = min(value, v)
 
-            if value <= alpha:
+            if self.enable_pruning and value <= alpha:
                 prune_msg = f"[PRUNED] at d={depth}: {move_str} (score {value:.1f} <= alpha {alpha:.1f})"
                 with self.telemetry.lock:
                     self.telemetry.prune_count += 1
