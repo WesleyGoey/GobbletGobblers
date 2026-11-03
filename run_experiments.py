@@ -20,17 +20,7 @@ from game_engine import (
     PLAYER_BLUE, PLAYER_ORANGE, PLAYER_NAMES,
     SIZE_NAMES
 )
-from ai_agent import MinimaxAgent
-
-
-class RandomAgent:
-    """Agent that chooses uniformly at random among all legal moves."""
-    def __init__(self, player: int):
-        self.player = player
-
-    def get_action(self, state: GameState) -> Optional[Move]:
-        legal_moves = state.get_legal_moves(self.player)
-        return random.choice(legal_moves) if legal_moves else None
+from ai_agent import MinimaxAgent, RandomPlayer
 
 
 def test_1_aturan_game() -> Dict[str, Any]:
@@ -83,7 +73,7 @@ def test_2_ai_vs_random(num_matches: int = 50) -> Dict[str, Any]:
         
         ai_agent = MinimaxAgent(player=ai_player, max_depth=2, memory_window=5)
         ai_agent.step_delay = 0.0
-        rand_agent = RandomAgent(player=rand_player)
+        rand_agent = RandomPlayer(player=rand_player)
         
         turn = 0
         max_turns = 60

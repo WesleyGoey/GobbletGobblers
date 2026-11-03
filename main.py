@@ -10,7 +10,7 @@ import sys
 import argparse
 from typing import Optional
 from game_engine import GameState, PLAYER_BLUE, PLAYER_ORANGE, PLAYER_NAMES
-from ai_agent import MinimaxAgent
+from ai_agent import MinimaxAgent, RandomPlayer
 
 
 DIFFICULTY_MAP = {
@@ -20,50 +20,88 @@ DIFFICULTY_MAP = {
 }
 
 
-def run_cli_match(win_streak: int = 5, difficulty: str = "medium", depth: Optional[int] = None, max_turns: int = 40):
+def run_cli_match(
+    win_streak: int = 5,
+    difficulty: str = "medium",
+    depth: Optional[int] = None,
+    max_turns: int = 40,
+    opponent: str = "random",
+    matches: int = 1
+):
     diff = difficulty.lower() if isinstance(difficulty, str) and difficulty.lower() in DIFFICULTY_MAP else "medium"
     cfg = DIFFICULTY_MAP[diff]
     search_depth = depth if depth is not None else cfg['depth']
     mem_win = cfg['memory_window']
 
     print("=" * 60)
-    print(f" Gobblet Gobblers 5x5 - CLI Simulation Match ({win_streak}-in-a-row)")
+    print(f" Gobblet Gobblers 5x5 - CLI Simulation ({win_streak}-in-a-row)")
     print(f" Difficulty: {diff.upper()} (Depth {search_depth}, Memory Window {mem_win})")
-    print(" Player 1 (Blue) vs Player 2 (Orange AI)")
+    p1_desc = "Player 1 (Blue - Random Player / Pemain Acak)" if opponent == "random" else "Player 1 (Blue - Minimax AI)"
+    print(f" {p1_desc} vs Player 2 (Orange - Minimax AI)")
     print("=" * 60)
 
-    state = GameState(win_streak=win_streak)
-    blue_agent = MinimaxAgent(player=PLAYER_BLUE, max_depth=search_depth, memory_window=mem_win)
-    orange_agent = MinimaxAgent(player=PLAYER_ORANGE, max_depth=search_depth, memory_window=mem_win)
-    blue_agent.step_delay = 0
-    orange_agent.step_delay = 0
+    ai_wins = 0
+    p1_wins = 0
+    draws = 0
 
-    while not state.game_over and state.turn_number <= max_turns:
-        active_p = state.current_player
-        agent = blue_agent if active_p == PLAYER_BLUE else orange_agent
-        p_name = PLAYER_NAMES[active_p]
+    for match_num in range(1, matches + 1):
+        if matches > 1:
+            print(f">>> Match {match_num}/{matches} in progress... <<<")
+        state = GameState(win_streak=win_streak)
+        if opponent == "random":
+            blue_agent = RandomPlayer(player=PLAYER_BLUE)
+        else:
+            blue_agent = MinimaxAgent(player=PLAYER_BLUE, max_depth=search_depth, memory_window=mem_win)
+            blue_agent.step_delay = 0
 
-        print(f"\n--- Turn {state.turn_number}: {p_name} ---")
-        move = agent.get_action(state)
-        if not move:
-            print(f"No legal moves for {p_name}! Match ends.")
-            break
+        orange_agent = MinimaxAgent(player=PLAYER_ORANGE, max_depth=search_depth, memory_window=mem_win)
+        orange_agent.step_delay = 0
 
-        print(f"Action: {move}")
-        state.apply_move(move)
+        while not state.game_over and state.turn_number <= max_turns:
+            active_p = state.current_player
+            agent = blue_agent if active_p == PLAYER_BLUE else orange_agent
+            p_name = PLAYER_NAMES[active_p]
 
-        # Print current visible board
-        for r in range(5):
-            row_str = " | ".join(str(state.get_top_piece(r, c) or "  .  ") for c in range(5))
-            print(f"  [{row_str}]")
+            if matches == 1:
+                print(f"\n--- Turn {state.turn_number}: {p_name} ---")
+            move = agent.get_action(state)
+            if not move:
+                if matches == 1:
+                    print(f"No legal moves for {p_name}! Match ends.")
+                break
 
-    print("\n" + "=" * 60)
-    if state.game_over:
-        print(f"GAME OVER! Winner: {PLAYER_NAMES[state.winner]}")
-        print(f"Reason: {state.win_reason}")
-    else:
-        print("Match reached turn limit without a winner.")
-    print("=" * 60)
+            if matches == 1:
+                print(f"Action: {move}")
+            state.apply_move(move)
+
+            if matches == 1:
+                for r in range(5):
+                    row_str = " | ".join(str(state.get_top_piece(r, c) or "  .  ") for c in range(5))
+                    print(f"  [{row_str}]")
+
+        if state.winner == PLAYER_ORANGE:
+            ai_wins += 1
+        elif state.winner == PLAYER_BLUE:
+            p1_wins += 1
+        else:
+            draws += 1
+
+        if matches == 1:
+            print("\n" + "=" * 60)
+            if state.game_over:
+                print(f"GAME OVER! Winner: {PLAYER_NAMES[state.winner]}")
+                print(f"Reason: {state.win_reason}")
+            else:
+                print("Match reached turn limit without a winner.")
+            print("=" * 60)
+
+    if matches > 1:
+        print("\n" + "=" * 60)
+        print(f" SIMULATION TOURNAMENT SUMMARY ({matches} Matches)")
+        print(f" Orange (Minimax AI) Wins : {ai_wins} ({(ai_wins / matches) * 100:.1f}%)")
+        print(f" Blue ({'Pemain Acak' if opponent == 'random' else 'AI'}) Wins  : {p1_wins} ({(p1_wins / matches) * 100:.1f}%)")
+        print(f" Draws                    : {draws} ({(draws / matches) * 100:.1f}%)")
+        print("=" * 60)
 
 
 def main():
@@ -75,10 +113,21 @@ def main():
     parser.add_argument("--goal", "--win-streak", dest="goal", type=int, choices=[4, 5], default=5,
                         help="Win streak condition: 5-in-a-row (default) or 4-in-a-row")
     parser.add_argument("--max-turns", type=int, default=40, help="Maximum turns for CLI simulation match (default: 40)")
+    parser.add_argument("--opponent", choices=["random", "ai"], default="random",
+                        help="Opponent type in CLI simulation: 'random' (Pemain Acak / Random Player baseline) or 'ai' (Minimax AI)")
+    parser.add_argument("--matches", type=int, default=1,
+                        help="Number of simulation matches to run in CLI mode (default: 1)")
     args = parser.parse_args()
 
     if args.cli:
-        run_cli_match(win_streak=args.goal, difficulty=args.difficulty, depth=args.depth, max_turns=args.max_turns)
+        run_cli_match(
+            win_streak=args.goal,
+            difficulty=args.difficulty,
+            depth=args.depth,
+            max_turns=args.max_turns,
+            opponent=args.opponent,
+            matches=args.matches
+        )
     else:
         # Launch Pygame GUI
         from gui import GobbletGUI

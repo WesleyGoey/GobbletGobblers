@@ -16,6 +16,7 @@ Key features:
 """
 
 from typing import List, Tuple, Optional, Dict, Any, Callable
+import random
 import time
 import math
 import threading
@@ -24,6 +25,30 @@ from game_engine import (
     CELL_LINES_4, CELL_LINES_5,
     PLAYER_BLUE, PLAYER_ORANGE, SIZE_SYMBOLS, SIZE_NAMES, PLAYER_NAMES
 )
+
+
+class RandomPlayer:
+    """
+    Simulated baseline opponent ('Pemain Acak') that selects legal moves uniformly at random.
+    Directly satisfies the Table 3 testing specification ('AI vs pemain acak').
+    """
+
+    def __init__(self, player: int = PLAYER_BLUE, seed: Optional[int] = None):
+        self.player = player
+        self.rng = random.Random(seed)
+
+    def get_action(
+        self,
+        state: GameState,
+        step_callback: Optional[Callable[[str, Any], None]] = None,
+        cancel_event: Optional[threading.Event] = None
+    ) -> Optional[Move]:
+        legal_moves = state.get_legal_moves(self.player)
+        return self.rng.choice(legal_moves) if legal_moves else None
+
+
+# Backward-compatibility alias
+RandomAgent = RandomPlayer
 
 
 class MemoryInspector:
