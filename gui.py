@@ -29,7 +29,6 @@ from game_engine import (
 )
 from ai_agent import MinimaxAgent, SearchTelemetry, MemoryInspector
 from gui_renderer import BoardRenderer, lerp_color
-from gui_telemetry import TelemetryPanelRenderer
 
 # --- Color Palette (Warm Wooden & Slate Tabletop Aesthetic) ---
 COLOR_BG = (18, 20, 26)             # Deep slate table surface
@@ -76,7 +75,7 @@ DIFFICULTY_CONFIGS = {
         "depth": 1,
         "memory_window": 3,
         "search_budget_ratio": 0.5,
-        "time_limit": 0.05,
+        "time_limit": 0.1,
         "evaluation_noise": 120.0,
         "label": "[DIFFICULTY] EASY",
         "color": COLOR_GREEN_ACCENT,
@@ -141,7 +140,7 @@ def lerp_color(c1: Tuple[int, int, int], c2: Tuple[int, int, int], t: float) -> 
 
 
 class GobbletGUI:
-    def __init__(self, width: int = 1320, height: int = 860, win_streak: int = 5, difficulty: str = "medium"):
+    def __init__(self, width: int = 760, height: int = 760, win_streak: int = 5, difficulty: str = "medium"):
         """
         Initializes the Gobblet Gobblers Pygame desktop GUI application.
 
@@ -155,8 +154,8 @@ class GobbletGUI:
             - Dedicated modular subsystem renderers (BoardRenderer and TelemetryPanelRenderer).
 
         Parameters:
-            width: Screen width in pixels (defaults to 1320).
-            height: Screen height in pixels (defaults to 860).
+            width: Screen width in pixels (defaults to 760).
+            height: Screen height in pixels (defaults to 760).
             win_streak: Winning line length requirement (must be 5).
             difficulty: AI level ('easy', 'medium', or 'hard').
 
@@ -195,6 +194,10 @@ class GobbletGUI:
         self.selected_reserve_size: Optional[int] = None
         self.selected_board_pos: Optional[Tuple[int, int]] = None
         self.valid_targets: List[Tuple[int, int]] = []
+
+        # Session Match Timer (5 minutes / 300 seconds, starts upon first placed piece)
+        self.session_time_limit: float = 300.0
+        self.session_start_time: Optional[float] = None
 
         # AI Agent & Difficulty Settings
         self.difficulty: str = (
@@ -288,7 +291,6 @@ class GobbletGUI:
 
         # Modular Renderer & Telemetry Subsystems
         self.renderer = BoardRenderer(self)
-        self.telemetry_renderer = TelemetryPanelRenderer(self)
 
     def set_difficulty(self, difficulty: str):
         """
@@ -360,6 +362,20 @@ class GobbletGUI:
         self.hover_anim[key] = val
         return val
 
+    def check_session_timer(self):
+        """Checks if the 5-minute match session has expired; ends the match in a draw if so."""
+        if not self.state.game_over and self.session_start_time is not None:
+            elapsed = time.time() - self.session_start_time
+            if elapsed >= self.session_time_limit:
+                self.state.game_over = True
+                self.state.winner = None
+                self.state.win_reason = "Time limit expired (5:00) - Match ended in a DRAW!"
+                self.status_message = "Time limit reached: Draw!"
+                if self.cancel_search_event:
+                    self.cancel_search_event.set()
+                self.ai_thinking = False
+                self.pending_ai_move = None
+
     def run(self):
         """
         Executes the main application loop at a locked 60 FPS.
@@ -368,6 +384,7 @@ class GobbletGUI:
         and Pygame display buffer flipping until window closure.
         """
         while self.running:
+            self.check_session_timer()
             self.handle_events()
             self.process_ai_queue()
             self.draw()
@@ -633,6 +650,8 @@ class GobbletGUI:
             move: The human Move object to execute.
         """
         success = self.state.apply_move(move)
+        if success and self.session_start_time is None:
+            self.session_start_time = time.time()
         self.selected_reserve_size = None
         self.selected_board_pos = None
         self.valid_targets = []
@@ -642,6 +661,15 @@ class GobbletGUI:
         if success and not self.state.game_over:
             # Trigger AI turn in background thread
             self.start_ai_turn()
+
+    def get_remaining_session_time(self) -> float:
+        """Returns the remaining seconds in the current 5-minute session."""
+        if self.state.game_over:
+            return 0.0
+        if self.session_start_time is None:
+            return self.session_time_limit
+        elapsed = time.time() - self.session_start_time
+        return max(0.0, self.session_time_limit - elapsed)
 
     def start_ai_turn(self):
         """
@@ -757,6 +785,7 @@ class GobbletGUI:
         self.search_id += 1  # Invalidate any running background search
         self.win_streak = 5
         self.state = GameState(win_streak=5)
+        self.session_start_time = None
         self.selected_reserve_size = None
         self.selected_board_pos = None
         self.valid_targets = []
@@ -807,7 +836,6 @@ class GobbletGUI:
         self.draw_reserves()
         self.draw_board()
         self.draw_controls()
-        self.draw_visualization_panel()
 
     def draw_header(self):
         """
@@ -914,11 +942,5 @@ class GobbletGUI:
         self.renderer.draw_controls()
 
     def draw_visualization_panel(self):
-        """
-        Serves as the facade delegator for the AI Decision Telemetry HUD panel.
-
-        Delegates to `TelemetryPanelRenderer.draw_visualization_panel()`, drawing the 4-quadrant
-        real-time diagnostic HUD on the right side of the canvas (search metrics, candidate move
-        evaluations, live tree pruning branches, and bounded cognitive memory buffer).
-        """
-        self.telemetry_renderer.draw_visualization_panel()
+        """No-op: telemetry HUD panel disabled for clean gameplay UI."""
+        pass

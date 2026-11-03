@@ -288,6 +288,20 @@ class BoardRenderer:
         title_surf = self.text_cache.render(gui.font_title, "GOBBLET GOBBLERS", gui.COLOR_TEXT_WHITE)
         screen.blit(title_surf, (140, 25))
 
+        # Render 5-minute session countdown clock on the right side of the header
+        rem_sec = int(gui.get_remaining_session_time()) if hasattr(gui, "get_remaining_session_time") else 300
+        mins = rem_sec // 60
+        secs = rem_sec % 60
+        time_text = f"{mins:02d}:{secs:02d}"
+        time_col = gui.COLOR_RED_ACCENT if rem_sec <= 30 else (gui.COLOR_TEXT_HIGHLIGHT if rem_sec <= 60 else (180, 200, 220))
+
+        clock_rect = pygame.Rect(520, 26, 100, 32)
+        pygame.draw.rect(screen, (24, 30, 42), clock_rect, border_radius=6)
+        pygame.draw.rect(screen, (42, 54, 76), clock_rect, 1, border_radius=6)
+        clock_surf = self.text_cache.render(gui.font_bold, time_text, time_col)
+        screen.blit(clock_surf, (clock_rect.centerx - clock_surf.get_width() // 2,
+                                 clock_rect.centery - clock_surf.get_height() // 2))
+
         subtitle = self.text_cache.render(
             gui.font_small,
             f"5x5 Grid | Win: {gui.win_streak}-in-a-row | AI: {gui.difficulty.upper()} (Depth {gui.ai_depth})",
@@ -301,8 +315,12 @@ class BoardRenderer:
         pygame.draw.rect(screen, gui.COLOR_BORDER, banner_rect, 1, border_radius=8)
 
         if gui.state.game_over:
-            badge_text = "[VICTORY]"
-            badge_col = gui.COLOR_TEXT_HIGHLIGHT if gui.state.winner == PLAYER_BLUE else gui.COLOR_ORANGE_LIGHT
+            if gui.state.winner is None:
+                badge_text = "[DRAW]"
+                badge_col = gui.COLOR_TEXT_HIGHLIGHT
+            else:
+                badge_text = "[VICTORY]"
+                badge_col = gui.COLOR_TEXT_HIGHLIGHT if gui.state.winner == PLAYER_BLUE else gui.COLOR_ORANGE_LIGHT
             msg_text = gui.state.win_reason
         elif gui.ai_thinking:
             badge_text = "[AI THINKING]"
