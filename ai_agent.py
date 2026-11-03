@@ -21,7 +21,7 @@ import time
 import math
 import threading
 from game_engine import (
-    GameState, Piece, Move, WINNING_LINES, WINNING_LINES_5,
+    GameState, Move, WINNING_LINES, WINNING_LINES_5,
     CELL_LINES, CELL_LINES_5,
     PLAYER_BLUE, PLAYER_ORANGE, SIZE_SYMBOLS, SIZE_NAMES, PLAYER_NAMES
 )
@@ -45,7 +45,7 @@ class MemoryInspector:
 
         Returns:
             A list of status dictionaries containing position, stack depth, piece references,
-            temporal age, remembered boolean flag, and formatted display strings for UI telemetry.
+            temporal age, remembered boolean flag, and formatted display strings.
         """
         current_turn = game_state.turn_number
         memory_records = []
@@ -384,88 +384,6 @@ class AIHeuristic:
         return score
 
 
-class SearchTelemetry:
-    """Holds real-time search state and decision logs for the live GUI panel (thread-safe)."""
-
-    def __init__(self):
-        """
-        Serves as the constructor and thread-safe state container initializer for SearchTelemetry.
-
-        Establishes the mutual exclusion primitive (`threading.Lock`) used to synchronize shared
-        search state between background Minimax computation threads and the main GUI rendering thread
-        (60 FPS event loop). Immediately delegates to `reset()` to initialize all search counters,
-        timing trackers, candidate score maps, pruned branch logs, and cognitive memory snapshots.
-        """
-        self.lock = threading.Lock()
-        self.reset()
-
-    def reset(self):
-        """
-        Resets all real-time search metrics and candidate move tables to their baseline states.
-
-        Clears node visit counters, prune counters, timers, candidate move score maps,
-        current search branch trails, and memory snapshots.
-        """
-        with self.lock:
-            self.is_searching: bool = False
-            self.current_depth: int = 0
-            self.max_depth: int = 3
-            self.nodes_visited: int = 0
-            self.prune_count: int = 0
-            self.start_time: float = 0.0
-            self.elapsed_time: float = 0.0
-            self.time_budget_exceeded: bool = False
-
-            # Tree logs and candidate moves
-            self.candidate_scores: Dict[str, float] = {}  # move_str -> score
-            self.current_branch: List[str] = []           # moves in current search path
-            self.tree_log: List[Dict[str, Any]] = []      # recent node visits / pruned events
-            self.pruned_branches: List[str] = []          # descriptions of pruned cuts
-            self.best_move: Optional[Move] = None
-            self.best_score: float = -math.inf
-            self.memory_snapshot: List[Dict[str, Any]] = []
-
-    def get_candidate_scores_copy(self) -> List[Tuple[str, float]]:
-        """
-        Thread-safely acquires and returns a shallow copy of root candidate moves and scores.
-
-        Returns:
-            A list of (move_str, evaluation_score) tuples representing root actions explored so far.
-        """
-        with self.lock:
-            return list(self.candidate_scores.items())
-
-    def get_pruned_branches_copy(self) -> List[str]:
-        """
-        Thread-safely acquires and returns a shallow copy of logged Alpha-Beta pruning cutoff events.
-
-        Returns:
-            A list of formatted strings describing recent cutoff occurrences and threshold values.
-        """
-        with self.lock:
-            return list(self.pruned_branches)
-
-    def get_current_branch_copy(self) -> List[str]:
-        """
-        Thread-safely acquires and returns a shallow copy of the active search tree branch path.
-
-        Returns:
-            A list of move strings forming the sequence from root to the currently explored node.
-        """
-        with self.lock:
-            return list(self.current_branch)
-
-    def get_memory_snapshot_copy(self) -> List[Dict[str, Any]]:
-        """
-        Thread-safely acquires and returns a copy of the AI cognitive memory status records.
-
-        Returns:
-            A list of dictionaries describing buried pieces, temporal ages, and retention states.
-        """
-        with self.lock:
-            return list(self.memory_snapshot)
-
-
 def order_moves_heuristically(moves: List[Move]) -> None:
     """
     Sorts moves in-place using a lightweight tactical heuristic to optimize Alpha-Beta pruning.
@@ -511,8 +429,7 @@ def order_moves_heuristically(moves: List[Move]) -> None:
 
 class MinimaxAgent:
     """
-    Minimax agent with Alpha-Beta Pruning, Bounded Rationality (5-move Memory Window),
-    and live real-time search event callbacks.
+    Minimax agent with Alpha-Beta Pruning and Bounded Rationality (Forgetting Memory Window).
     """
 
     def __init__(
@@ -520,7 +437,6 @@ class MinimaxAgent:
         player: int = PLAYER_ORANGE,
         max_depth: int = 3,
         memory_window: int = 5,
-        telemetry: Optional[SearchTelemetry] = None,
         enable_pruning: bool = True,
         time_limit: Optional[float] = None,
         search_budget_ratio: float = 1.0,
@@ -534,25 +450,29 @@ class MinimaxAgent:
             player: Player assignment (PLAYER_ORANGE by default).
             max_depth: Maximum ply depth for minimax game tree exploration (e.g. 1, 2, or 3).
             memory_window: Number of turns hidden pieces remain remembered in the belief state.
-            telemetry: Shared SearchTelemetry instance for live GUI metrics streaming.
-            enable_pruning: Flag enabling Alpha-Beta branch cutoffs (True for standard play;
-                            can be disabled to benchmark against Pure Minimax).
+            enable_pruning: Flag enabling Alpha-Beta branch cutoffs.
+            time_limit: Optional wall-clock time budget in seconds for search execution.
+            search_budget_ratio: Fraction of candidate moves (0.0 < ratio <= 1.0) to evaluate.
+            evaluation_noise: Imperfect perception noise magnitude in handicapped mode.
+            seed: Optional random seed for deterministic testing of handicapped modes.
         """
         self.player = player
         self.max_depth = max_depth
         self.memory_window = memory_window
-        self.telemetry = telemetry if telemetry is not None else SearchTelemetry()
         self.enable_pruning = enable_pruning
         self.time_limit: Optional[float] = time_limit
         self.search_budget_ratio: float = search_budget_ratio
         self.evaluation_noise: float = evaluation_noise
         self.rng = random.Random(seed)
-        self.step_delay: float = 0.005  # Slight throttle for visually satisfying live updates
+        self.step_delay: float = 0.005
+        self.nodes_visited: int = 0
+        self.prune_count: int = 0
+        self.start_time: float = 0.0
 
     def _is_time_up(self) -> bool:
         """Checks whether the configured wall-clock search time limit has expired."""
-        if self.time_limit is not None and self.telemetry.start_time > 0:
-            return (time.time() - self.telemetry.start_time) >= self.time_limit
+        if self.time_limit is not None and self.start_time > 0:
+            return (time.time() - self.start_time) >= self.time_limit
         return False
 
     def get_action(
@@ -569,8 +489,7 @@ class MinimaxAgent:
         2. Gathers and heuristically orders all legal moves available to the AI.
         3. Evaluates each candidate move by simulating the action and exploring the game tree
            via `_min_value`, updating alpha bounds.
-        4. Dispatches live telemetry events via `step_callback` for UI visualization.
-        5. Supports graceful search cancellation if `cancel_event` is signaled.
+        4. Supports graceful search cancellation if `cancel_event` is signaled.
 
         Parameters:
             real_state: The actual ground-truth GameState.
@@ -583,24 +502,16 @@ class MinimaxAgent:
         search_depth = self.max_depth
         search_memory = self.memory_window
 
-        self.telemetry.reset()
-        self.telemetry.is_searching = True
-        self.telemetry.max_depth = search_depth
-        self.telemetry.start_time = time.time()
+        self.nodes_visited = 0
+        self.prune_count = 0
+        self.start_time = time.time()
 
-        # Step 1: Capture and log memory state
-        memory_records = MemoryInspector.get_memory_snapshot(real_state, search_memory)
-        self.telemetry.memory_snapshot = memory_records
-        if step_callback:
-            step_callback('MEMORY_STATE', memory_records)
-
-        # Step 2: Build internal belief state with forgetting memory
+        # Step 1: Build internal belief state with forgetting memory
         belief_state = build_belief_state(real_state, search_memory)
 
-        # Step 3: Get legal moves
+        # Step 2: Get legal moves
         legal_moves = belief_state.get_legal_moves(self.player)
         if not legal_moves:
-            self.telemetry.is_searching = False
             return None
 
         is_handicapped = (
@@ -628,33 +539,13 @@ class MinimaxAgent:
         # Root level search
         for idx, move in enumerate(legal_moves):
             if cancel_event and cancel_event.is_set():
-                with self.telemetry.lock:
-                    self.telemetry.is_searching = False
                 return None
 
             if idx > 0 and (idx >= max_candidates or self._is_time_up()):
-                cutoff_msg = f"[TIME CUTOFF] Search halted early ({idx}/{len(legal_moves)} moves evaluated)"
-                with self.telemetry.lock:
-                    self.telemetry.time_budget_exceeded = True
-                    self.telemetry.pruned_branches.append(cutoff_msg)
-                    if len(self.telemetry.pruned_branches) > 8:
-                        self.telemetry.pruned_branches.pop(0)
-                if step_callback:
-                    step_callback('TIME_CUTOFF', {'evaluated': idx, 'total': len(legal_moves), 'message': cutoff_msg})
                 break
 
             move_str = str(move)
-            with self.telemetry.lock:
-                self.telemetry.current_branch = [move_str]
-                self.telemetry.nodes_visited += 1
-
-            if step_callback:
-                step_callback('EXPLORING_ROOT', {
-                    'move': move,
-                    'move_str': move_str,
-                    'alpha': alpha,
-                    'beta': beta
-                })
+            self.nodes_visited += 1
 
             # Simulate move on cloned belief state
             next_state = belief_state.clone()
@@ -669,56 +560,24 @@ class MinimaxAgent:
                     depth=1,
                     alpha=alpha,
                     beta=beta,
-                    path=[move_str],
-                    step_callback=step_callback,
                     search_depth=search_depth,
                     cancel_event=cancel_event
                 )
 
             if cancel_event and cancel_event.is_set():
-                with self.telemetry.lock:
-                    self.telemetry.is_searching = False
                 return None
 
             if self.evaluation_noise > 0.0:
                 score += self.rng.uniform(-self.evaluation_noise, self.evaluation_noise)
 
-            with self.telemetry.lock:
-                self.telemetry.candidate_scores[move_str] = round(score, 1)
-                if score > best_score:
-                    best_score = score
-                    best_move = move
-                    self.telemetry.best_move = best_move
-                    self.telemetry.best_score = round(best_score, 1)
+            if score > best_score:
+                best_score = score
+                best_move = move
 
             alpha = max(alpha, best_score)
 
-            if step_callback:
-                step_callback('ROOT_EVAL', {
-                    'move': move,
-                    'move_str': move_str,
-                    'score': score,
-                    'best_move': best_move,
-                    'best_score': best_score
-                })
-
             if self.step_delay > 0:
                 time.sleep(self.step_delay)
-
-        with self.telemetry.lock:
-            self.telemetry.is_searching = False
-            self.telemetry.elapsed_time = time.time() - self.telemetry.start_time
-            self.telemetry.best_move = best_move
-            self.telemetry.best_score = round(best_score, 1)
-
-        if step_callback:
-            step_callback('SEARCH_COMPLETE', {
-                'best_move': best_move,
-                'best_score': best_score,
-                'nodes_visited': self.telemetry.nodes_visited,
-                'prune_count': self.telemetry.prune_count,
-                'elapsed_time': self.telemetry.elapsed_time
-            })
 
         return best_move
 
@@ -728,8 +587,6 @@ class MinimaxAgent:
         depth: int,
         alpha: float,
         beta: float,
-        path: List[str],
-        step_callback: Optional[Callable[[str, Any], None]],
         search_depth: Optional[int] = None,
         cancel_event: Optional[threading.Event] = None
     ) -> float:
@@ -758,8 +615,7 @@ class MinimaxAgent:
 
         target_depth = search_depth if search_depth is not None else self.max_depth
 
-        with self.telemetry.lock:
-            self.telemetry.nodes_visited += 1
+        self.nodes_visited += 1
 
         if state.game_over:
             if state.winner == self.player:
@@ -785,42 +641,19 @@ class MinimaxAgent:
             if self._is_time_up():
                 break
 
-            move_str = str(move)
-            new_path = path + [move_str]
-            with self.telemetry.lock:
-                self.telemetry.current_branch = new_path
 
-            if step_callback and self.telemetry.nodes_visited % 15 == 0:
-                step_callback('NODE_VISIT', {
-                    'depth': depth,
-                    'path': new_path,
-                    'alpha': alpha,
-                    'beta': beta
-                })
 
             next_state = state.clone()
             next_state.apply_move(move)
 
             v = self._min_value(
-                next_state, depth + 1, alpha, beta, new_path, step_callback,
+                next_state, depth + 1, alpha, beta,
                 search_depth=target_depth, cancel_event=cancel_event
             )
             value = max(value, v)
 
             if self.enable_pruning and value >= beta:
-                prune_msg = f"[PRUNED] at d={depth}: {move_str} (score {value:.1f} >= beta {beta:.1f})"
-                with self.telemetry.lock:
-                    self.telemetry.prune_count += 1
-                    self.telemetry.pruned_branches.append(prune_msg)
-                    if len(self.telemetry.pruned_branches) > 8:
-                        self.telemetry.pruned_branches.pop(0)
-
-                if step_callback:
-                    step_callback('PRUNED', {
-                        'depth': depth,
-                        'move_str': move_str,
-                        'message': prune_msg
-                    })
+                self.prune_count += 1
                 return value
 
             alpha = max(alpha, value)
@@ -833,8 +666,6 @@ class MinimaxAgent:
         depth: int,
         alpha: float,
         beta: float,
-        path: List[str],
-        step_callback: Optional[Callable[[str, Any], None]],
         search_depth: Optional[int] = None,
         cancel_event: Optional[threading.Event] = None
     ) -> float:
@@ -863,8 +694,7 @@ class MinimaxAgent:
 
         target_depth = search_depth if search_depth is not None else self.max_depth
 
-        with self.telemetry.lock:
-            self.telemetry.nodes_visited += 1
+        self.nodes_visited += 1
 
         human_player = PLAYER_BLUE if self.player == PLAYER_ORANGE else PLAYER_ORANGE
 
@@ -892,42 +722,19 @@ class MinimaxAgent:
             if self._is_time_up():
                 break
 
-            move_str = str(move)
-            new_path = path + [move_str]
-            with self.telemetry.lock:
-                self.telemetry.current_branch = new_path
 
-            if step_callback and self.telemetry.nodes_visited % 15 == 0:
-                step_callback('NODE_VISIT', {
-                    'depth': depth,
-                    'path': new_path,
-                    'alpha': alpha,
-                    'beta': beta
-                })
 
             next_state = state.clone()
             next_state.apply_move(move)
 
             v = self._max_value(
-                next_state, depth + 1, alpha, beta, new_path, step_callback,
+                next_state, depth + 1, alpha, beta,
                 search_depth=target_depth, cancel_event=cancel_event
             )
             value = min(value, v)
 
             if self.enable_pruning and value <= alpha:
-                prune_msg = f"[PRUNED] at d={depth}: {move_str} (score {value:.1f} <= alpha {alpha:.1f})"
-                with self.telemetry.lock:
-                    self.telemetry.prune_count += 1
-                    self.telemetry.pruned_branches.append(prune_msg)
-                    if len(self.telemetry.pruned_branches) > 8:
-                        self.telemetry.pruned_branches.pop(0)
-
-                if step_callback:
-                    step_callback('PRUNED', {
-                        'depth': depth,
-                        'move_str': move_str,
-                        'message': prune_msg
-                    })
+                self.prune_count += 1
                 return value
 
             beta = min(beta, value)

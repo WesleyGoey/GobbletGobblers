@@ -165,7 +165,7 @@ def run_table_3_experiment(
         t0 = time.perf_counter()
         move_raw = agent_raw.get_action(st.clone())
         raw_time = (time.perf_counter() - t0) * 1000.0
-        raw_nodes = agent_raw.telemetry.nodes_visited
+        raw_nodes = agent_raw.nodes_visited
 
         # 2. Alpha-Beta Pruning (pruning enabled)
         agent_ab = MinimaxAgent(
@@ -178,7 +178,7 @@ def run_table_3_experiment(
         t1 = time.perf_counter()
         move_ab = agent_ab.get_action(st.clone())
         ab_time = (time.perf_counter() - t1) * 1000.0
-        ab_nodes = agent_ab.telemetry.nodes_visited
+        ab_nodes = agent_ab.nodes_visited
 
         nodes_cut = raw_nodes - ab_nodes
         reduction_pct = ((nodes_cut) / raw_nodes * 100.0) if raw_nodes > 0 else 0.0

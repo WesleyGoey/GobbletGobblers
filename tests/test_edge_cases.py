@@ -14,7 +14,7 @@ from game_engine import (
     generate_winning_lines, WINNING_LINES
 )
 from ai_agent import (
-    MinimaxAgent, MemoryInspector, build_belief_state, AIHeuristic, SearchTelemetry
+    MinimaxAgent, MemoryInspector, build_belief_state, AIHeuristic
 )
 
 
@@ -151,16 +151,14 @@ class TestGobbletEdgeCases(unittest.TestCase):
         snap8 = MemoryInspector.get_memory_snapshot(self.state, memory_window=5)
         self.assertFalse(snap8[0]['is_remembered'])
 
-    def test_telemetry_pruning_recorded(self):
+    def test_alpha_beta_pruning_execution(self):
         """
-        Serves as the integration test for Minimax Alpha-Beta pruning telemetry.
+        Serves as the integration test for Minimax Alpha-Beta search execution.
 
-        Configures a `MinimaxAgent` with an attached `SearchTelemetry` instance and executes
-        a depth-3 search on an active board configuration. Confirms that `nodes_visited`
-        is strictly positive and that `prune_count` records valid alpha-beta cutoffs.
+        Configures a `MinimaxAgent` and executes a depth-3 search on an active board configuration.
+        Confirms that the agent selects a valid move and tracks visited nodes and pruning cutoffs.
         """
-        telemetry = SearchTelemetry()
-        agent = MinimaxAgent(player=PLAYER_ORANGE, max_depth=3, memory_window=5, telemetry=telemetry)
+        agent = MinimaxAgent(player=PLAYER_ORANGE, max_depth=3, memory_window=5)
         agent.step_delay = 0
 
         # Run AI on game state with several pieces on board
@@ -170,8 +168,8 @@ class TestGobbletEdgeCases(unittest.TestCase):
 
         move = agent.get_action(self.state)
         self.assertIsNotNone(move)
-        self.assertGreater(telemetry.nodes_visited, 0)
-        self.assertGreaterEqual(telemetry.prune_count, 0)
+        self.assertGreater(agent.nodes_visited, 0)
+        self.assertGreaterEqual(agent.prune_count, 0)
 
     def test_simultaneous_5_in_a_row_uncover_trap(self):
         """

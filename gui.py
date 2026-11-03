@@ -6,7 +6,7 @@ Features:
 1. 5x5 Board with charming tactile Gobbler figurine visualization and tabletop fog-of-war.
 2. Blue (Human) vs Orange (AI) reserve trays with piece counts and selection highlights.
 3. Interactive 2-click move input with valid target destination highlighting.
-4. Threaded AI execution with real-time telemetry streaming:
+4. Threaded AI execution without blocking GUI loop:
    - Live search tree branch path display
    - Real-time candidate move scoring
    - Alpha-Beta pruning cutoff logs
@@ -24,15 +24,13 @@ from typing import Tuple, Optional, List, Dict, Any
 
 from game_engine import (
     GameState, Piece, Move,
-    PLAYER_BLUE, PLAYER_ORANGE, PLAYER_NAMES,
-    SIZE_NAMES, SIZE_SYMBOLS
+    PLAYER_BLUE, PLAYER_ORANGE, SIZE_NAMES
 )
-from ai_agent import MinimaxAgent, SearchTelemetry, MemoryInspector
-from gui_renderer import BoardRenderer, lerp_color
+from ai_agent import MinimaxAgent 
+from gui_renderer import BoardRenderer 
 
 # --- Color Palette (Warm Wooden & Slate Tabletop Aesthetic) ---
 COLOR_BG = (18, 20, 26)             # Deep slate table surface
-COLOR_PANEL_BG = (14, 16, 22)       # Quiet telemetry backdrop
 COLOR_CARD_BG = (22, 26, 36)        # Refined card fill
 COLOR_BORDER = (42, 48, 62)         # Crisp low-contrast border
 
@@ -208,20 +206,17 @@ class GobbletGUI:
         self.memory_window: int = diff_cfg["memory_window"]
         self.ai_speed_mode = "Normal"  # Kept for backward compatibility
         self.speed_delays = {"Normal": 0.003, "Fast": 0.001, "Instant": 0.0}
-        self.telemetry = SearchTelemetry()
-        self.telemetry.max_depth = self.ai_depth
         self.agent = MinimaxAgent(
             player=PLAYER_ORANGE,
             max_depth=self.ai_depth,
             memory_window=self.memory_window,
-            telemetry=self.telemetry,
             time_limit=diff_cfg.get("time_limit"),
             search_budget_ratio=diff_cfg.get("search_budget_ratio", 1.0),
             evaluation_noise=diff_cfg.get("evaluation_noise", 0.0),
         )
         self.agent.step_delay = self.speed_delays[self.ai_speed_mode]
 
-        # Threading for real-time live telemetry with search ID generation guard
+        # Threading for background AI computation with search ID generation guard
         self.ai_thread: Optional[threading.Thread] = None
         self.cancel_search_event: Optional[threading.Event] = None
         self.event_queue: queue.Queue = queue.Queue()
@@ -259,7 +254,7 @@ class GobbletGUI:
         # Palette & Configuration Attributes
         self.piece_radii = PIECE_RADII
         self.COLOR_BG = COLOR_BG
-        self.COLOR_PANEL_BG = COLOR_PANEL_BG
+        
         self.COLOR_CARD_BG = COLOR_CARD_BG
         self.COLOR_BORDER = COLOR_BORDER
         self.COLOR_BOARD_BG = COLOR_BOARD_BG
@@ -294,7 +289,7 @@ class GobbletGUI:
 
     def set_difficulty(self, difficulty: str):
         """
-        Updates the AI difficulty configuration and dynamically refreshes telemetry.
+        Updates the AI difficulty configuration.
 
         Adjusts Minimax search depth (1, 2, or 3) and cognitive memory window (3, 5, or 8 turns).
         If the AI is currently calculating a move when difficulty changes, cancels the current
@@ -315,11 +310,6 @@ class GobbletGUI:
         self.agent.time_limit = cfg.get("time_limit")
         self.agent.search_budget_ratio = cfg.get("search_budget_ratio", 1.0)
         self.agent.evaluation_noise = cfg.get("evaluation_noise", 0.0)
-        with self.telemetry.lock:
-            self.telemetry.max_depth = self.ai_depth
-            self.telemetry.memory_snapshot = MemoryInspector.get_memory_snapshot(
-                self.state, self.memory_window
-            )
 
         # If AI is currently thinking, restart search immediately with new difficulty
         if self.ai_thinking and not self.state.game_over and self.state.current_player == PLAYER_ORANGE:
@@ -333,7 +323,7 @@ class GobbletGUI:
         Transitions the difficulty setting sequentially along the circular preset path:
         `EASY (Depth 1, Memory 3) -> MEDIUM (Depth 2, Memory 5) -> HARD (Depth 3, Memory 8) -> EASY`.
         Calls `set_difficulty()` to immediately synchronize Minimax depth, memory window capacity,
-        telemetry panel HUD badges, and cancel/restart active AI background searches.
+        and cancel/restart active AI background searches.
         """
         curr_idx = DIFFICULTY_LEVELS.index(self.difficulty) if self.difficulty in DIFFICULTY_LEVELS else 1
         next_diff = DIFFICULTY_LEVELS[(curr_idx + 1) % len(DIFFICULTY_LEVELS)]
@@ -380,7 +370,7 @@ class GobbletGUI:
         """
         Executes the main application loop at a locked 60 FPS.
 
-        Orchestrates event handling, background AI telemetry processing, composite drawing,
+        Orchestrates event handling, background AI processing, composite drawing,
         and Pygame display buffer flipping until window closure.
         """
         while self.running:
@@ -677,7 +667,7 @@ class GobbletGUI:
 
         Signals cancellation to any prior in-flight searches, increments `search_id` to discard
         stale responses, flushes the event queue, and starts a daemon thread that streams
-        search telemetry to the GUI without freezing the 60 FPS animation loop.
+        AI moves to the GUI without freezing the 60 FPS animation loop.
         """
         if self.state.current_player == PLAYER_ORANGE and not self.state.game_over:
             if self.cancel_search_event:
@@ -716,7 +706,7 @@ class GobbletGUI:
 
                     Parameters:
                         event_type: Identifier string for the search event ('NODE_VISIT', 'PRUNE', etc.).
-                        data: Event payload dictionary containing telemetry metrics or branch paths.
+                        data: Event payload dictionary containing move data.
                     """
                     if not current_cancel.is_set():
                         self.event_queue.put((current_search_id, event_type, data))
@@ -734,7 +724,7 @@ class GobbletGUI:
 
     def process_ai_queue(self):
         """
-        Processes real-time telemetry events and pending moves delivered by the AI thread.
+        Processes pending moves delivered by the AI thread.
 
         Drains events from `event_queue`, filters out stale events from previous searches,
         captures MOVE_READY, and enforces a brief visual highlight pause (0.4s) before
@@ -791,8 +781,6 @@ class GobbletGUI:
         self.valid_targets = []
         self.uncover_trap_warning = False
         self.status_message = ""
-        self.telemetry.reset()
-        self.telemetry.max_depth = self.ai_depth
         cfg = DIFFICULTY_CONFIGS[self.difficulty]
         self.agent.max_depth = self.ai_depth
         self.agent.memory_window = self.memory_window
@@ -829,7 +817,7 @@ class GobbletGUI:
         Renders the complete GUI frame across all visual layers.
 
         Draws background fill, header banner, reserve trays, board grid and pieces,
-        control buttons, and the live AI decision telemetry panel.
+        and control buttons.
         """
         self.screen.fill(COLOR_BG)
         self.draw_header()
@@ -941,6 +929,3 @@ class GobbletGUI:
         """
         self.renderer.draw_controls()
 
-    def draw_visualization_panel(self):
-        """No-op: telemetry HUD panel disabled for clean gameplay UI."""
-        pass

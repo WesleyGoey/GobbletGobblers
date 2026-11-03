@@ -5,7 +5,6 @@ Usage:
   python main.py    # Launches full Pygame GUI with interactive board & live AI panel
 """
 
-import sys
 from gui import GobbletGUI
 
 

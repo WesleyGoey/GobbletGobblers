@@ -22,7 +22,7 @@ class TestGobbletGUI(unittest.TestCase):
 
         Instantiates a `GobbletGUI(width=1320, height=860)` instance operating under the
         SDL dummy video driver, providing full access to screen surfaces, component rects,
-        event queues, and telemetry rendering panels without requiring a physical monitor.
+        and event queues without requiring a physical monitor.
         """
         self.gui = GobbletGUI(width=1320, height=860)
 
@@ -41,7 +41,7 @@ class TestGobbletGUI(unittest.TestCase):
 
         Invokes `gui.draw()` on a freshly initialized game and verifies that all visual
         subsystems (header banner, player reserve trays, 5x5 board grid, control bar buttons,
-        and telemetry HUD panel) render onto the target screen surface without exceptions.
+        and controls) render onto the target screen surface without exceptions.
         """
         self.gui.draw()
         self.assertIsNotNone(self.gui.screen)
@@ -82,7 +82,7 @@ class TestGobbletGUI(unittest.TestCase):
         - First click transitions to `hard` (depth 3, memory 8).
         - Second click transitions to `easy` (depth 1, memory 3).
         - Third click cycles back to `medium`.
-        Verifies that agent depth, memory window, and telemetry limits synchronize at each step.
+        Verifies that agent depth and memory window synchronize at each step.
         """
         # Initial state should be default "medium"
         self.assertEqual(self.gui.difficulty, "medium")
@@ -90,7 +90,6 @@ class TestGobbletGUI(unittest.TestCase):
         self.assertEqual(self.gui.agent.max_depth, 2)
         self.assertEqual(self.gui.memory_window, 5)
         self.assertEqual(self.gui.agent.memory_window, 5)
-        self.assertEqual(self.gui.telemetry.max_depth, 2)
 
         # Click Difficulty button -> cycles to "hard"
         self.gui.handle_mouse_click(self.gui.btn_difficulty.center)
@@ -99,7 +98,6 @@ class TestGobbletGUI(unittest.TestCase):
         self.assertEqual(self.gui.agent.max_depth, 3)
         self.assertEqual(self.gui.memory_window, 8)
         self.assertEqual(self.gui.agent.memory_window, 8)
-        self.assertEqual(self.gui.telemetry.max_depth, 3)
 
         # Click Difficulty button -> cycles to "easy"
         self.gui.handle_mouse_click(self.gui.btn_difficulty.center)
@@ -108,7 +106,6 @@ class TestGobbletGUI(unittest.TestCase):
         self.assertEqual(self.gui.agent.max_depth, 1)
         self.assertEqual(self.gui.memory_window, 3)
         self.assertEqual(self.gui.agent.memory_window, 3)
-        self.assertEqual(self.gui.telemetry.max_depth, 1)
 
         # Click Difficulty button -> cycles back to "medium"
         self.gui.handle_mouse_click(self.gui.btn_difficulty.center)
@@ -117,7 +114,6 @@ class TestGobbletGUI(unittest.TestCase):
         self.assertEqual(self.gui.agent.max_depth, 2)
         self.assertEqual(self.gui.memory_window, 5)
         self.assertEqual(self.gui.agent.memory_window, 5)
-        self.assertEqual(self.gui.telemetry.max_depth, 2)
 
     def test_gui_reset_button(self):
         """
@@ -152,24 +148,6 @@ class TestGobbletGUI(unittest.TestCase):
         self.assertEqual(gui_hard.memory_window, 8)
         self.assertEqual(gui_hard.agent.max_depth, 3)
         self.assertEqual(gui_hard.agent.memory_window, 8)
-
-    def test_ai_telemetry_queue_processing(self):
-        """
-        Serves as the cross-thread AI telemetry event queue processing test.
-
-        Simulates background AI search event dispatch by pushing an `EXPLORING_ROOT` event
-        into `gui.event_queue`, invokes `gui.process_ai_queue()`, and verifies that the GUI
-        drains the event cleanly and renders without display surface errors.
-        """
-        self.gui.event_queue.put(('EXPLORING_ROOT', {
-            'move': Move(PLAYER_ORANGE, 'drop', (2, 2), size=3),
-            'move_str': "[Orange] Drop L -> (2,2)",
-            'alpha': -100,
-            'beta': 100
-        }))
-        self.gui.process_ai_queue()
-        # Draw should execute cleanly with telemetry populated
-        self.gui.draw()
 
     def test_touch_move_enforcement(self):
         """
@@ -347,7 +325,7 @@ class TestGobbletGUI(unittest.TestCase):
 
         Populates a rich 8-move match history and iterates through all difficulty presets
         (`easy`, `medium`, `hard`). Invokes `gui.draw()` for each setting, asserting that
-        the canvas and telemetry panels render all historical moves and badges cleanly.
+        the canvas renders cleanly.
         """
         from game_engine import Move, PLAYER_BLUE, PLAYER_ORANGE
         self.gui.state.move_history = [
