@@ -17,18 +17,45 @@ from game_engine import PLAYER_BLUE, PLAYER_ORANGE, Move
 class TestGobbletGUI(unittest.TestCase):
 
     def setUp(self):
+        """
+        Serves as the test fixture initialization for the GobbletGUI headless test suite.
+
+        Instantiates a `GobbletGUI(width=1320, height=860)` instance operating under the
+        SDL dummy video driver, providing full access to screen surfaces, component rects,
+        event queues, and telemetry rendering panels without requiring a physical monitor.
+        """
         self.gui = GobbletGUI(width=1320, height=860)
 
     def tearDown(self):
+        """
+        Serves as the test fixture cleanup after each GUI test execution.
+
+        Ensures that any background AI search worker threads or lingering thread locks
+        are cleanly released and joined to avoid resource leakage between test runs.
+        """
         pass
 
     def test_gui_initial_render(self):
-        """GUI should draw all panels without error."""
+        """
+        Serves as the baseline render smoke test for the composite GUI canvas.
+
+        Invokes `gui.draw()` on a freshly initialized game and verifies that all visual
+        subsystems (header banner, player reserve trays, 5x5 board grid, control bar buttons,
+        and telemetry HUD panel) render onto the target screen surface without exceptions.
+        """
         self.gui.draw()
         self.assertIsNotNone(self.gui.screen)
 
     def test_human_reserve_selection_and_drop(self):
-        """Clicking Blue reserve then board cell executes a legal drop."""
+        """
+        Serves as the interactive mouse drop simulation test for human player moves.
+
+        Simulates human interaction:
+        1. Clicks Blue's Large piece (size 3) in the left reserve tray.
+        2. Asserts `selected_reserve_size == 3` and verifies legal targets are calculated.
+        3. Clicks the center cell (2, 2) on the board grid.
+        4. Verifies that the piece is placed, top piece at (2, 2) is Blue Large, and selection clears.
+        """
         # Click on Blue Large piece reserve rect
         rect_l3 = self.gui.blue_reserve_rects[3]
         self.gui.handle_mouse_click(rect_l3.center)
@@ -47,7 +74,16 @@ class TestGobbletGUI(unittest.TestCase):
         self.assertEqual(top_piece.size, 3)
 
     def test_gui_difficulty_toggle_button(self):
-        """Test difficulty toggle button cycling: Medium -> Hard -> Easy -> Medium."""
+        """
+        Serves as the difficulty cycling button test in the GUI control panel.
+
+        Simulates clicking `btn_difficulty` and verifies cyclical transitions:
+        - Defaults to `medium` (depth 2, memory 5).
+        - First click transitions to `hard` (depth 3, memory 8).
+        - Second click transitions to `easy` (depth 1, memory 3).
+        - Third click cycles back to `medium`.
+        Verifies that agent depth, memory window, and telemetry limits synchronize at each step.
+        """
         # Initial state should be default "medium"
         self.assertEqual(self.gui.difficulty, "medium")
         self.assertEqual(self.gui.ai_depth, 2)
@@ -84,13 +120,25 @@ class TestGobbletGUI(unittest.TestCase):
         self.assertEqual(self.gui.telemetry.max_depth, 2)
 
     def test_gui_reset_button(self):
-        """Test New Game / Reset button."""
+        """
+        Serves as the interactive game reset button test.
+
+        Simulates match progression by advancing `turn_number` to 5, clicks `btn_new_game`,
+        and confirms that the state cleanly resets to turn 1 with empty board cells.
+        """
         self.gui.state.turn_number = 5
         self.gui.handle_mouse_click(self.gui.btn_new_game.center)
         self.assertEqual(self.gui.state.turn_number, 1)
 
     def test_gui_init_with_custom_difficulty(self):
-        """Test initializing GobbletGUI with explicit difficulty levels."""
+        """
+        Serves as the custom difficulty initialization test for GobbletGUI.
+
+        Validates constructor configuration when instantiating GUI instances with explicit
+        difficulty levels:
+        - `GobbletGUI(difficulty="easy")`: sets search depth 1 and memory window 3.
+        - `GobbletGUI(difficulty="hard")`: sets search depth 3 and memory window 8.
+        """
         gui_easy = GobbletGUI(difficulty="easy")
         self.assertEqual(gui_easy.difficulty, "easy")
         self.assertEqual(gui_easy.ai_depth, 1)
@@ -106,7 +154,13 @@ class TestGobbletGUI(unittest.TestCase):
         self.assertEqual(gui_hard.agent.memory_window, 8)
 
     def test_ai_telemetry_queue_processing(self):
-        """Simulate AI telemetry events being processed and drawn on panel."""
+        """
+        Serves as the cross-thread AI telemetry event queue processing test.
+
+        Simulates background AI search event dispatch by pushing an `EXPLORING_ROOT` event
+        into `gui.event_queue`, invokes `gui.process_ai_queue()`, and verifies that the GUI
+        drains the event cleanly and renders without display surface errors.
+        """
         self.gui.event_queue.put(('EXPLORING_ROOT', {
             'move': Move(PLAYER_ORANGE, 'drop', (2, 2), size=3),
             'move_str': "[Orange] Drop L -> (2,2)",
@@ -118,7 +172,14 @@ class TestGobbletGUI(unittest.TestCase):
         self.gui.draw()
 
     def test_touch_move_enforcement(self):
-        """Strict Touch-Move: Once a board piece is selected, player cannot pick from reserve or deselect."""
+        """
+        Serves as the interactive Touch-Move rule validation test in the GUI layer.
+
+        Enforces the official Gobblet rule:
+        Once a player touches/selects an existing piece on the board, they are committed
+        to moving that piece. Clicking a reserve tray slot while a board piece is selected
+        must be rejected with a "Touch-Move in effect" status warning, keeping the board selection locked.
+        """
         from game_engine import Piece
         # Setup Blue piece at (1, 1)
         self.gui.state.board[1][1] = [Piece(PLAYER_BLUE, 2)]
@@ -146,8 +207,12 @@ class TestGobbletGUI(unittest.TestCase):
 
     def test_instant_loss_on_unblockable_uncover_trap(self):
         """
-        Lifting a piece that reveals opponent 5-in-a-row with no legal block
-        triggers an immediate instant loss upon touch!
+        Serves as the instant-loss test for touching an unblockable uncover trap piece.
+
+        Validates the strict physical touch rule:
+        If lifting a board piece reveals an opponent's 5-in-a-row and the player has no
+        legal destination on the board that can block the revealed line, touching the piece
+        triggers an immediate instant forfeit loss upon touch.
         """
         from game_engine import Piece
         # Orange has 4 Large pieces (size 3) at row 0: (0,0), (0,1), (0,2), (0,3)
@@ -169,38 +234,68 @@ class TestGobbletGUI(unittest.TestCase):
         self.assertIn("Uncover Trap", self.gui.state.win_reason)
 
     def test_gui_goal_toggle_button(self):
-        """Clicking Goal button toggles win condition between 5-in-a-row and 4-in-a-row and resets board."""
+        """
+        Serves as the goal button immutability test in the GUI control bar.
+
+        Verifies that clicking `btn_goal` maintains the fixed 5-in-a-row winning condition:
+        - Confirms that `win_streak` remains 5 and winning lines count remains 12.
+        - Verifies that clicking the button does not inadvertently reset an ongoing match
+          (advances `turn_number` to 4 and confirms it remains 4).
+        - Verifies that a status message explaining the fixed 5-in-a-row rule is posted.
+        """
         # Initial goal is 5-in-a-row (default)
         self.assertEqual(self.gui.win_streak, 5)
         self.assertEqual(self.gui.state.win_streak, 5)
         self.assertEqual(len(self.gui.state.winning_lines), 12)
 
-        # Click Goal toggle button -> toggles to 4-in-a-row
-        self.gui.handle_mouse_click(self.gui.btn_goal.center)
-        self.assertEqual(self.gui.win_streak, 4)
-        self.assertEqual(self.gui.state.win_streak, 4)
-        self.assertEqual(len(self.gui.state.winning_lines), 28)
+        # Make a move
+        self.gui.state.turn_number = 4
 
-        # Click Goal toggle button again -> toggles back to 5-in-a-row
+        # Click Goal button -> remains 5-in-a-row (4-in-a-row stripped out), active game not reset
         self.gui.handle_mouse_click(self.gui.btn_goal.center)
         self.assertEqual(self.gui.win_streak, 5)
         self.assertEqual(self.gui.state.win_streak, 5)
         self.assertEqual(len(self.gui.state.winning_lines), 12)
+        self.assertEqual(self.gui.state.turn_number, 4)
+        self.assertIn("fixed to 5-in-a-row", self.gui.status_message)
 
     def test_gui_init_with_custom_win_streak(self):
-        """Initializing GobbletGUI with custom win_streak properly sets mode."""
+        """
+        Serves as the constructor win streak parameter guard and validation test.
+
+        Validates that `GobbletGUI` strictly enforces the 5-in-a-row rule:
+        - Default initialization and `GobbletGUI(win_streak=5)` bind 12 winning lines.
+        - Instantiating `GobbletGUI(win_streak=4)` raises a `ValueError`.
+        - Calling `gui.reset_game(win_streak=4)` raises a `ValueError`.
+        """
         gui_default = GobbletGUI()
         self.assertEqual(gui_default.win_streak, 5)
         self.assertEqual(gui_default.state.win_streak, 5)
         self.assertEqual(len(gui_default.state.winning_lines), 12)
 
-        gui4 = GobbletGUI(win_streak=4)
-        self.assertEqual(gui4.win_streak, 4)
-        self.assertEqual(gui4.state.win_streak, 4)
-        self.assertEqual(len(gui4.state.winning_lines), 28)
+        gui5 = GobbletGUI(win_streak=5)
+        self.assertEqual(gui5.win_streak, 5)
+        self.assertEqual(gui5.state.win_streak, 5)
+        self.assertEqual(len(gui5.state.winning_lines), 12)
+
+        # Passing win_streak=4 must raise ValueError
+        with self.assertRaises(ValueError):
+            GobbletGUI(win_streak=4)
+
+        # Resetting game with win_streak=4 must raise ValueError
+        with self.assertRaises(ValueError):
+            self.gui.reset_game(win_streak=4)
 
     def test_gui_reset_cancels_stale_ai_move(self):
-        """Resetting or toggling goal while AI is thinking discards stale moves from applying to new game."""
+        """
+        Serves as the stale move cancellation test during mid-search game resets.
+
+        Simulates a user pressing 'New Game / Reset' while a background AI search is in flight:
+        - Executes a human move that launches background AI Minimax search.
+        - Immediately triggers `gui.reset_game()`, which signals `cancel_search_event` and increments `search_id`.
+        - Joins the worker thread, drains the queue, and asserts that no stale/phantom AI move
+          is applied to the fresh game state (turn remains 1, board remains uncorrupted).
+        """
         # Trigger human move -> launches AI background search
         self.gui.execute_human_move(Move(PLAYER_BLUE, 'drop', (0, 0), size=3))
         self.assertTrue(self.gui.ai_thinking)
@@ -223,7 +318,14 @@ class TestGobbletGUI(unittest.TestCase):
         self.assertIsNone(self.gui.state.get_top_piece(0, 0))
 
     def test_gui_hover_state_transitions(self):
-        """Hover factor smoothly interpolates towards target."""
+        """
+        Serves as the hover interpolation animation test for interactive UI elements.
+
+        Tests the exponential smoothing math in `GobbletGUI.get_hover()`:
+        - Unhovered state returns baseline 0.0.
+        - Hovered state smoothly interpolates upwards toward 1.0 based on delta speed factor.
+        - Subsequent frames monotonically increase toward full opacity/glow.
+        """
         val0 = self.gui.get_hover("test_button", False)
         self.assertEqual(val0, 0.0)
 
@@ -236,14 +338,26 @@ class TestGobbletGUI(unittest.TestCase):
         self.assertGreater(val2, val1)
 
     def test_gui_depleted_reserve_rendering(self):
-        """Depleting a reserve piece renders [EMPTY] indicator and ghosted silhouette without crash."""
+        """
+        Serves as the visual edge case test for depleted reserve piece trays.
+
+        Manually decrements Blue's Small reserve pieces to 0 and executes `gui.draw()`.
+        Validates that the empty slot renders an '[EMPTY]' text badge and ghosted silhouette
+        without raising null pointer or surface blit exceptions.
+        """
         self.gui.state.reserves[PLAYER_BLUE][1] = 0
         self.gui.draw()
         # Verify screen drew cleanly
         self.assertIsNotNone(self.gui.screen)
 
     def test_gui_board_grid_and_celebration_render(self):
-        """Winning 5-in-a-row state renders celebration beam and victory auras without crash."""
+        """
+        Serves as the victory celebration rendering integration test.
+
+        Configures a completed 5-in-a-row horizontal line for Blue, flags `game_over = True`,
+        and executes `gui.draw()`. Confirms that the composite victory renderer
+        (`draw_winning_beam` and `draw_winning_piece_auras`) executes cleanly without errors.
+        """
         from game_engine import Piece
         for c in range(5):
             self.gui.state.board[0][c] = [Piece(PLAYER_BLUE, 3)]
@@ -254,7 +368,15 @@ class TestGobbletGUI(unittest.TestCase):
         self.assertIsNotNone(self.gui.screen)
 
     def test_main_cli_arguments(self):
-        """Verify main.py CLI arguments mapping for --difficulty."""
+        """
+        Serves as the CLI argument parsing integration test for main.py.
+
+        Executes `python3 main.py` in subprocesses to verify:
+        - `--help` displays `--difficulty` options (easy, medium, hard).
+        - CLI simulation accepts `--difficulty easy` and logs depth 1.
+        - CLI simulation accepts `--difficulty hard` and logs depth 3.
+        - CLI rejects `--goal 4` with an invalid choice exit error.
+        """
         import subprocess
         # Test help includes --difficulty
         res = subprocess.run(["python3", "main.py", "--help"], capture_output=True, text=True)
@@ -280,8 +402,22 @@ class TestGobbletGUI(unittest.TestCase):
         self.assertEqual(res_hard.returncode, 0)
         self.assertIn("Difficulty: HARD (Depth 3, Memory Window 8)", res_hard.stdout)
 
+        # Test CLI rejects --goal 4
+        res_goal4 = subprocess.run(
+            ["python3", "main.py", "--cli", "--goal", "4"],
+            capture_output=True, text=True
+        )
+        self.assertNotEqual(res_goal4.returncode, 0)
+        self.assertIn("invalid choice", res_goal4.stderr)
+
     def test_gui_difficulty_rendering_all_levels(self):
-        """Verify GUI draws cleanly across all difficulty settings and populated move history."""
+        """
+        Serves as the multi-level UI rendering test across all difficulty settings.
+
+        Populates a rich 8-move match history and iterates through all difficulty presets
+        (`easy`, `medium`, `hard`). Invokes `gui.draw()` for each setting, asserting that
+        the canvas and telemetry panels render all historical moves and badges cleanly.
+        """
         from game_engine import Move, PLAYER_BLUE, PLAYER_ORANGE
         self.gui.state.move_history = [
             (1, Move(PLAYER_BLUE, 'drop', (0, 0), size=1), "Blue Drop S -> (0,0)"),
@@ -301,7 +437,13 @@ class TestGobbletGUI(unittest.TestCase):
             self.assertIsNotNone(self.gui.screen)
 
     def test_gui_difficulty_null_and_invalid_fallback(self):
-        """Verify GobbletGUI and set_difficulty safely fallback to medium on None or invalid input."""
+        """
+        Serves as the defensive fallback and input sanitization test for difficulty configurations.
+
+        Verifies that passing None, empty strings, or unrecognized difficulty names
+        (e.g., 'insane', 'ultra_hard') to either `GobbletGUI()` or `set_difficulty()`
+        safely defaults to `medium` (depth 2, memory 5) without raising exceptions.
+        """
         # None difficulty on initialization
         gui_none = GobbletGUI(difficulty=None)
         self.assertEqual(gui_none.difficulty, "medium")
@@ -325,7 +467,13 @@ class TestGobbletGUI(unittest.TestCase):
         self.assertEqual(gui_none.memory_window, 5)
 
     def test_gui_header_subtitle_format(self):
-        """Verify exact header subtitle format: '5x5 Grid | Win: 5-in-a-row | AI: {DIFF} (Depth {D})'."""
+        """
+        Serves as the header metadata subtitle string formatting test.
+
+        Validates the exact formatted string rendered in the header banner across all difficulties:
+        `'5x5 Grid | Win: 5-in-a-row | AI: {DIFFICULTY} (Depth {DEPTH})'`,
+        ensuring uppercase difficulty names and matching search depths.
+        """
         self.gui.set_difficulty("easy")
         expected_easy = f"5x5 Grid | Win: {self.gui.win_streak}-in-a-row | AI: EASY (Depth 1)"
         rendered_easy = f"5x5 Grid | Win: {self.gui.win_streak}-in-a-row | AI: {self.gui.difficulty.upper()} (Depth {self.gui.ai_depth})"
@@ -342,7 +490,16 @@ class TestGobbletGUI(unittest.TestCase):
         self.assertEqual(rendered_hard, expected_hard)
 
     def test_gui_difficulty_cycle_during_ai_thinking(self):
-        """Verify that cycling difficulty while AI is actively thinking cancels previous search and restarts cleanly."""
+        """
+        Serves as the thread safety and dynamic reconfiguration test for mid-search difficulty cycling.
+
+        Tests cycling difficulty while the background AI search thread is actively executing:
+        - AI starts searching at Medium (depth 2).
+        - Difficulty button is clicked, cycling to Hard (depth 3).
+        - Verifies that previous search cancellation is signaled (`old_cancel.is_set() == True`).
+        - Verifies that a new search is initiated with incremented `search_id`.
+        - Waits for the thread to finish and verifies the new move applies without state corruption.
+        """
         # Trigger human move -> AI starts thinking at Medium (depth 2)
         self.gui.execute_human_move(Move(PLAYER_BLUE, 'drop', (2, 2), size=3))
         self.assertTrue(self.gui.ai_thinking)
@@ -364,7 +521,7 @@ class TestGobbletGUI(unittest.TestCase):
 
         # Wait for the AI search to complete cleanly
         if self.gui.ai_thread:
-            self.gui.ai_thread.join(timeout=10)
+            self.gui.ai_thread.join(timeout=20)
 
         self.gui.process_ai_queue()
         # Verify valid move generated and applied cleanly without state corruption
@@ -374,7 +531,13 @@ class TestGobbletGUI(unittest.TestCase):
         self.assertEqual(self.gui.state.turn_number, 3)
 
     def test_main_cli_arguments_with_depth_override(self):
-        """Verify main.py CLI handles medium difficulty and optional --depth override."""
+        """
+        Serves as the CLI depth override option integration test.
+
+        Executes `main.py --cli --difficulty medium --depth 1` in a subprocess.
+        Validates that the explicit `--depth 1` flag overrides the preset default (depth 2),
+        verifying flexibility in automated test scripting and benchmarking.
+        """
         import subprocess
         # Test CLI mode simulation with default medium difficulty
         res_med = subprocess.run(

@@ -12,7 +12,7 @@ Features:
    - Alpha-Beta pruning cutoff logs
    - AI Cognitive Memory HUD (5-move working memory buffer without spoilers)
    - Final chosen move highlighted in vibrant green
-5. UI controls: New Game, Goal toggle (4-in-a-row vs 5-in-a-row), AI Difficulty toggle (Easy/Medium/Hard).
+5. UI controls: New Game, Goal display (5-in-a-row), AI Difficulty toggle (Easy/Medium/Hard).
 """
 
 import pygame
@@ -115,7 +115,20 @@ PIECE_RADII = {
 
 
 def lerp_color(c1: Tuple[int, int, int], c2: Tuple[int, int, int], t: float) -> Tuple[int, int, int]:
-    """Linearly interpolate between two RGB colors with t clamped in [0.0, 1.0]."""
+    """
+    Linearly interpolates between two RGB color tuples.
+
+    Clamps the interpolation factor `t` to the [0.0, 1.0] range to ensure valid RGB channels.
+    Used for smooth hover transitions and responsive UI animations.
+
+    Parameters:
+        c1: Starting RGB color tuple (r, g, b).
+        c2: Target RGB color tuple (r, g, b).
+        t: Interpolation factor (0.0 returns c1, 1.0 returns c2).
+
+    Returns:
+        Interpolated (r, g, b) integer color tuple.
+    """
     t = max(0.0, min(1.0, t))
     return (
         int(c1[0] + (c2[0] - c1[0]) * t),
@@ -126,6 +139,30 @@ def lerp_color(c1: Tuple[int, int, int], c2: Tuple[int, int, int], t: float) -> 
 
 class GobbletGUI:
     def __init__(self, width: int = 1320, height: int = 860, win_streak: int = 5, difficulty: str = "medium"):
+        """
+        Initializes the Gobblet Gobblers Pygame desktop GUI application.
+
+        Configures:
+            - Display surface (width x height), window caption, and 60 FPS clock.
+            - Font typography resources for titles, banners, HUD panels, and buttons.
+            - Core GameState with fixed 5-in-a-row win condition.
+            - Minimax AI agent, SearchTelemetry, and bounded memory parameters.
+            - Background AI worker thread orchestration, event queue, and cancellation tokens.
+            - UI bounding rectangles for board grid, player reserve trays, and action buttons.
+            - Dedicated modular subsystem renderers (BoardRenderer and TelemetryPanelRenderer).
+
+        Parameters:
+            width: Screen width in pixels (defaults to 1320).
+            height: Screen height in pixels (defaults to 860).
+            win_streak: Winning line length requirement (must be 5).
+            difficulty: AI level ('easy', 'medium', or 'hard').
+
+        Raises:
+            ValueError: If win_streak is not 5.
+        """
+        if win_streak != 5:
+            raise ValueError("Only 5-in-a-row is supported as a win condition on a 5x5 board")
+
         pygame.init()
         pygame.font.init()
 
@@ -149,9 +186,9 @@ class GobbletGUI:
         self.font_small = pygame.font.SysFont("Helvetica, Arial", 11)
         self.font_mono = pygame.font.SysFont("Courier, Consolas, Menlo", 12)
 
-        # Game State
-        self.win_streak: int = win_streak
-        self.state = GameState(win_streak=self.win_streak)
+        # Game State (Fixed to 5-in-a-row)
+        self.win_streak: int = 5
+        self.state = GameState(win_streak=5)
         self.selected_reserve_size: Optional[int] = None
         self.selected_board_pos: Optional[Tuple[int, int]] = None
         self.valid_targets: List[Tuple[int, int]] = []
@@ -250,7 +287,16 @@ class GobbletGUI:
         self.telemetry_renderer = TelemetryPanelRenderer(self)
 
     def set_difficulty(self, difficulty: str):
-        """Sets the AI difficulty level, updating max_depth, memory_window, and telemetry live."""
+        """
+        Updates the AI difficulty configuration and dynamically refreshes telemetry.
+
+        Adjusts Minimax search depth (1, 2, or 3) and cognitive memory window (3, 5, or 8 turns).
+        If the AI is currently calculating a move when difficulty changes, cancels the current
+        thread search and immediately restarts evaluation under the newly chosen difficulty.
+
+        Parameters:
+            difficulty: The requested level ('easy', 'medium', or 'hard').
+        """
         diff = (
             difficulty.lower() if isinstance(difficulty, str) and difficulty.lower() in DIFFICULTY_CONFIGS else "medium"
         )
@@ -271,13 +317,34 @@ class GobbletGUI:
             self.start_ai_turn()
 
     def cycle_difficulty(self):
-        """Cycles through EASY -> MEDIUM -> HARD -> EASY and updates agent telemetry."""
+        """
+        Serves as the interactive cycling controller for AI difficulty settings.
+
+        Triggered when the user clicks the 'Difficulty' button in the control panel.
+        Transitions the difficulty setting sequentially along the circular preset path:
+        `EASY (Depth 1, Memory 3) -> MEDIUM (Depth 2, Memory 5) -> HARD (Depth 3, Memory 8) -> EASY`.
+        Calls `set_difficulty()` to immediately synchronize Minimax depth, memory window capacity,
+        telemetry panel HUD badges, and cancel/restart active AI background searches.
+        """
         curr_idx = DIFFICULTY_LEVELS.index(self.difficulty) if self.difficulty in DIFFICULTY_LEVELS else 1
         next_diff = DIFFICULTY_LEVELS[(curr_idx + 1) % len(DIFFICULTY_LEVELS)]
         self.set_difficulty(next_diff)
 
     def get_hover(self, key: str, is_hovered: bool, speed: float = 0.3) -> float:
-        """Returns smoothed hover factor (0.0 to 1.0) with fast responsive ease."""
+        """
+        Computes a responsive smoothed hover factor (0.0 to 1.0) with ease-out interpolation.
+
+        Tracks persistent hover values per UI element key to create fluid animations
+        when mouse enters or leaves interactive buttons, cards, and grid cells.
+
+        Parameters:
+            key: Unique string identifier for the UI element.
+            is_hovered: True if mouse cursor is currently over the element; False otherwise.
+            speed: Smoothing lerp rate per frame (default 0.3).
+
+        Returns:
+            Current smoothed hover magnitude between 0.0 and 1.0.
+        """
         curr = self.hover_anim.get(key, 0.0)
         target = 1.0 if is_hovered else 0.0
         val = curr + (target - curr) * speed
@@ -287,7 +354,12 @@ class GobbletGUI:
         return val
 
     def run(self):
-        """Main game loop running at 60 FPS."""
+        """
+        Executes the main application loop at a locked 60 FPS.
+
+        Orchestrates event handling, background AI telemetry processing, composite drawing,
+        and Pygame display buffer flipping until window closure.
+        """
         while self.running:
             self.handle_events()
             self.process_ai_queue()
@@ -298,6 +370,12 @@ class GobbletGUI:
         pygame.quit()
 
     def handle_events(self):
+        """
+        Pumps and dispatches Pygame window and input events.
+
+        Listens for QUIT events to cleanly terminate the main loop and processes
+        left mouse button clicks by routing coordinates to `handle_mouse_click`.
+        """
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
@@ -308,14 +386,24 @@ class GobbletGUI:
                 self.handle_mouse_click(mouse_pos)
 
     def handle_mouse_click(self, pos: Tuple[int, int]):
+        """
+        Routes mouse click coordinates to UI buttons, reserve trays, or board cells.
+
+        Checks interaction gates: ignores board input if the game is over, if it is the AI's turn,
+        or if the AI is actively thinking. Dispatches clicks to control buttons (New Game, Goal,
+        Difficulty), Blue reserve trays, or board cell coordinates.
+
+        Parameters:
+            pos: (x, y) screen pixel coordinates of the click.
+        """
         # Check Button Clicks first
         if self.btn_new_game.collidepoint(pos):
             self.reset_game()
             return
 
         if self.btn_goal.collidepoint(pos):
-            self.win_streak = 5 if self.win_streak == 4 else 4
-            self.reset_game(self.win_streak)
+            self.win_streak = 5
+            self.status_message = "Goal is fixed to 5-in-a-row."
             return
 
         if self.btn_difficulty.collidepoint(pos):
@@ -356,6 +444,21 @@ class GobbletGUI:
                     return
 
     def handle_cell_click(self, r: int, c: int):
+        """
+        Handles user clicks on board cells across all selection states.
+
+        Manages three distinct interaction contexts:
+        - Case A: A reserve piece is selected -> Drops the reserve piece onto cell (r, c)
+          if valid, or cancels/redirects selection if invalid.
+        - Case B: A board piece is locked under Touch-Move -> Repositions the piece to cell (r, c)
+          if valid, or enforces touch-move rule if clicking elsewhere.
+        - Case C: No piece currently selected -> Attempts to select the friendly Blue piece
+          at cell (r, c) via `try_select_board_piece`.
+
+        Parameters:
+            r: Target row index (0 to 4).
+            c: Target column index (0 to 4).
+        """
         # Case A: A reserve piece is selected -> Try to drop
         if self.selected_reserve_size is not None:
             if (r, c) in self.valid_targets:
@@ -403,7 +506,19 @@ class GobbletGUI:
             self.try_select_board_piece(r, c)
 
     def try_select_board_piece(self, r: int, c: int):
-        """Attempts to select a board piece with Touch-Move and Uncover Trap enforcement."""
+        """
+        Attempts to select a board piece with Touch-Move and Uncover Trap enforcement.
+
+        Rules enforced:
+        - Uncover Trap check: Tests whether lifting the piece reveals an opponent winning line.
+          If revealed and no legal destination can block all opponent lines, Blue suffers an
+          instant loss. If blocking moves exist, restricts valid targets strictly to those blocks.
+        - Touch-Move rule: Once touched, the piece is locked and must be moved to a valid cell.
+
+        Parameters:
+            r: Row index (0 to 4) of selected piece.
+            c: Column index (0 to 4) of selected piece.
+        """
         top_piece = self.state.get_top_piece(r, c)
         if not top_piece or top_piece.player != PLAYER_BLUE:
             return
@@ -445,6 +560,15 @@ class GobbletGUI:
         self.status_message = f"Touch-Move: Piece at ({r},{c}) locked. Click highlighted target."
 
     def calculate_valid_targets_for_drop(self, size: int):
+        """
+        Populates valid destination cells where a piece of `size` can be dropped from reserve.
+
+        Scans the 5x5 board and includes any cell that is either empty or topped by a piece
+        with size strictly less than `size`.
+
+        Parameters:
+            size: Size tier of the reserve piece being dropped (1, 2, or 3).
+        """
         self.valid_targets = []
         for r in range(5):
             for c in range(5):
@@ -453,6 +577,21 @@ class GobbletGUI:
                     self.valid_targets.append((r, c))
 
     def calculate_valid_targets_for_move(self, r1: int, c1: int, is_trap: bool = False) -> List[Tuple[int, int]]:
+        """
+        Calculates all valid destination board cells for moving a piece from (r1, c1).
+
+        Filters cells by size rules (target must be empty or contain a smaller piece).
+        If `is_trap` is True, simulates placement on candidate cells and only keeps targets
+        that successfully block and break all revealed opponent winning lines.
+
+        Parameters:
+            r1: Source row index (0 to 4).
+            c1: Source column index (0 to 4).
+            is_trap: Whether lifting this piece triggers an Uncover Trap.
+
+        Returns:
+            List of valid destination (r2, c2) coordinate tuples.
+        """
         targets = []
         top_piece = self.state.get_top_piece(r1, c1)
         if not top_piece:
@@ -482,6 +621,15 @@ class GobbletGUI:
         return targets
 
     def execute_human_move(self, move: Move):
+        """
+        Executes a validated human move, updates state, and initiates the AI's response turn.
+
+        Applies the move to `self.state`, clears selection indicators, and if the match continues,
+        dispatches `start_ai_turn` to compute the AI's counter-move in a background thread.
+
+        Parameters:
+            move: The human Move object to execute.
+        """
         success = self.state.apply_move(move)
         self.selected_reserve_size = None
         self.selected_board_pos = None
@@ -494,6 +642,13 @@ class GobbletGUI:
             self.start_ai_turn()
 
     def start_ai_turn(self):
+        """
+        Launches the Minimax AI calculation asynchronously in a background worker thread.
+
+        Signals cancellation to any prior in-flight searches, increments `search_id` to discard
+        stale responses, flushes the event queue, and starts a daemon thread that streams
+        search telemetry to the GUI without freezing the 60 FPS animation loop.
+        """
         if self.state.current_player == PLAYER_ORANGE and not self.state.game_over:
             if self.cancel_search_event:
                 self.cancel_search_event.set()
@@ -513,7 +668,26 @@ class GobbletGUI:
                     break
 
             def run_search():
+                """
+                Worker function executed within the background AI thread.
+
+                Invokes MinimaxAgent.get_action with live step callbacks and pushes
+                MOVE_READY to event_queue upon completion.
+                """
                 def callback(event_type, data):
+                    """
+                    Serves as the cross-thread event forwarding bridge during Minimax search execution.
+
+                    Invoked synchronously by the Minimax search worker whenever a search event occurs
+                    (e.g., node visit, alpha-beta cutoff, root candidate evaluation, or memory update).
+                    Checks `current_cancel` to prevent posting stale events from superseded searches,
+                    and packs `(current_search_id, event_type, data)` into the thread-safe `event_queue`
+                    to be drained by the GUI main thread without causing frame drops or race conditions.
+
+                    Parameters:
+                        event_type: Identifier string for the search event ('NODE_VISIT', 'PRUNE', etc.).
+                        data: Event payload dictionary containing telemetry metrics or branch paths.
+                    """
                     if not current_cancel.is_set():
                         self.event_queue.put((current_search_id, event_type, data))
 
@@ -529,7 +703,13 @@ class GobbletGUI:
             self.ai_thread.start()
 
     def process_ai_queue(self):
-        """Processes telemetry events emitted by the AI search thread."""
+        """
+        Processes real-time telemetry events and pending moves delivered by the AI thread.
+
+        Drains events from `event_queue`, filters out stale events from previous searches,
+        captures MOVE_READY, and enforces a brief visual highlight pause (0.4s) before
+        applying the chosen AI move to the board so the user can see the decision clearly.
+        """
         while not self.event_queue.empty():
             try:
                 item = self.event_queue.get_nowait()
@@ -559,12 +739,22 @@ class GobbletGUI:
                     self.state.apply_move(move)
 
     def reset_game(self, win_streak: Optional[int] = None):
+        """
+        Resets the board state, cancels running AI threads, and initializes a new game.
+
+        Parameters:
+            win_streak: Optional new win goal (must be 5). Preserves current goal if None.
+
+        Raises:
+            ValueError: If win_streak is specified and not 5.
+        """
+        if win_streak is not None and win_streak != 5:
+            raise ValueError("Only 5-in-a-row is supported as a win condition on a 5x5 board")
         if self.cancel_search_event:
             self.cancel_search_event.set()
         self.search_id += 1  # Invalidate any running background search
-        if win_streak is not None:
-            self.win_streak = win_streak
-        self.state = GameState(win_streak=self.win_streak)
+        self.win_streak = 5
+        self.state = GameState(win_streak=5)
         self.selected_reserve_size = None
         self.selected_board_pos = None
         self.valid_targets = []
@@ -583,6 +773,16 @@ class GobbletGUI:
                 break
 
     def get_cell_rect(self, r: int, c: int) -> pygame.Rect:
+        """
+        Calculates the on-screen pixel bounding box (pygame.Rect) for grid cell (r, c).
+
+        Parameters:
+            r: Row index (0 to 4).
+            c: Column index (0 to 4).
+
+        Returns:
+            A pygame.Rect with pixel coordinates and dimensions matching the cell tile.
+        """
         x = self.board_rect.x + c * (self.cell_size + self.cell_gap) + 4
         y = self.board_rect.y + r * (self.cell_size + self.cell_gap) + 4
         return pygame.Rect(x, y, self.cell_size, self.cell_size)
@@ -590,6 +790,12 @@ class GobbletGUI:
     # ==================== DRAWING ROUTINES & SUBSYSTEM DELEGATION ====================
 
     def draw(self):
+        """
+        Renders the complete GUI frame across all visual layers.
+
+        Draws background fill, header banner, reserve trays, board grid and pieces,
+        control buttons, and the live AI decision telemetry panel.
+        """
         self.screen.fill(COLOR_BG)
         self.draw_header()
         self.draw_reserves()
@@ -598,31 +804,115 @@ class GobbletGUI:
         self.draw_visualization_panel()
 
     def draw_header(self):
+        """
+        Serves as the facade rendering delegator for the application header banner.
+
+        Delegates rendering to `BoardRenderer.draw_header()`, passing GUI state to draw
+        the game title, subtitle (grid size, win streak, difficulty mode, search depth),
+        and the dynamic active-turn status card.
+        """
         self.renderer.draw_header()
 
     def draw_reserves(self):
+        """
+        Serves as the facade rendering delegator for the side reserve piece trays.
+
+        Delegates rendering to `BoardRenderer.draw_reserves()`, rendering Blue's tray
+        on the left and Orange's tray on the right, complete with piece counts, 3D figurines,
+        selection highlights, and depleted slot indicators.
+        """
         self.renderer.draw_reserves()
 
     def draw_board(self):
+        """
+        Serves as the facade rendering delegator for the primary 5x5 game board.
+
+        Delegates rendering to `BoardRenderer.draw_board()`, drawing board wooden styling,
+        grid grooves, cell bevels, legal target placement markers, mouse hover highlights,
+        and visible top pieces. Also triggers victory celebration effects when game is won.
+        """
         self.renderer.draw_board()
 
     def draw_winning_beam(self, winning_line: List[Tuple[int, int]]):
+        """
+        Serves as the facade delegator for the victory connection beam effect.
+
+        Delegates to `BoardRenderer.draw_winning_beam()`, rendering a multi-layered glowing
+        laser beam and connector halos along the straight-line coordinates of the winning line.
+
+        Parameters:
+            winning_line: List of consecutive (r, c) cell coordinates forming the winning 5-in-a-row.
+        """
         self.renderer.draw_winning_beam(winning_line)
 
     def draw_winning_piece_auras(self, winning_line: List[Tuple[int, int]]):
+        """
+        Serves as the facade delegator for victory piece crown auras.
+
+        Delegates to `BoardRenderer.draw_winning_piece_auras()`, drawing pulsing golden rings
+        and sparkling victory diamond stars directly on top of pieces in the winning line.
+
+        Parameters:
+            winning_line: List of (r, c) cell coordinates belonging to the winning line.
+        """
         self.renderer.draw_winning_piece_auras(winning_line)
 
     def draw_winning_celebration(self, winning_line: List[Tuple[int, int]]):
+        """
+        Serves as the composite victory celebration effect delegator.
+
+        Delegates to `BoardRenderer.draw_winning_celebration()`, coordinating both the floor-level
+        glowing connection beam and the top-level golden piece crown auras.
+
+        Parameters:
+            winning_line: List of (r, c) cell coordinates forming the winning alignment.
+        """
         self.renderer.draw_winning_celebration(winning_line)
 
     def draw_cell_stack(self, center: Tuple[int, int], stack: List[Piece]):
+        """
+        Serves as the facade delegator for drawing a cell's piece stack.
+
+        Delegates to `BoardRenderer.draw_cell_stack()`, rendering the topmost visible piece
+        at screen pixel center `center`, or skipping rendering if the stack is vacant.
+
+        Parameters:
+            center: Pixel coordinates (x, y) on the screen canvas representing the cell center.
+            stack: List of Piece objects occupying the cell from base to top.
+        """
         self.renderer.draw_cell_stack(center, stack)
 
     def draw_piece_3d(self, center: Tuple[int, int], size: int, player: int, is_top: bool = True, is_disabled: bool = False):
+        """
+        Serves as the tactile 3D Gobbler figurine rendering delegator.
+
+        Delegates to `BoardRenderer.draw_piece_3d()`, fetching pre-rendered flyweight sprites
+        from `PieceSpriteCache` and blitting them with sub-pixel centering onto the screen surface.
+
+        Parameters:
+            center: Screen pixel coordinate (x, y) where the piece figurine should be centered.
+            size: Piece size tier (1 = Small, 2 = Medium, 3 = Large).
+            player: Player identifier (PLAYER_BLUE or PLAYER_ORANGE) determining color palette.
+            is_top: True if piece is topmost/visible; False if partially occluded.
+            is_disabled: True if piece slot is depleted or unavailable for interaction.
+        """
         self.renderer.draw_piece_3d(center, size, player, is_top=is_top, is_disabled=is_disabled)
 
     def draw_controls(self):
+        """
+        Serves as the facade delegator for the bottom control bar.
+
+        Delegates to `BoardRenderer.draw_controls()`, rendering interactive UI buttons
+        ('Difficulty', 'New Game / Reset', 'Goal') with smooth hover animations and active status texts.
+        """
         self.renderer.draw_controls()
 
     def draw_visualization_panel(self):
+        """
+        Serves as the facade delegator for the AI Decision Telemetry HUD panel.
+
+        Delegates to `TelemetryPanelRenderer.draw_visualization_panel()`, drawing the 4-quadrant
+        real-time diagnostic HUD on the right side of the canvas (search metrics, candidate move
+        evaluations, live tree pruning branches, and bounded cognitive memory buffer).
+        """
         self.telemetry_renderer.draw_visualization_panel()

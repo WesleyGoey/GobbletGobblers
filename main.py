@@ -28,6 +28,27 @@ def run_cli_match(
     opponent: str = "random",
     matches: int = 1
 ):
+    """
+    Executes automated CLI simulation matches between AI agents or against a random baseline player.
+
+    Simulates headless matches on a 5x5 board without launching the Pygame GUI. Supports tournament
+    runs with win-rate statistics, ASCII board printing for single matches, and configurable search
+    depth and bounded rationality memory windows.
+
+    Parameters:
+        win_streak: Target continuous pieces in-a-row required to win (must be 5).
+        difficulty: AI difficulty preset ('easy', 'medium', or 'hard') mapped from DIFFICULTY_MAP.
+        depth: Explicit search depth override. If None, uses depth from difficulty preset.
+        max_turns: Upper turn cutoff limit per match before declaring a draw (default 40).
+        opponent: 'random' for RandomPlayer (Pemain Acak baseline) or 'ai' for self-play Minimax AI.
+        matches: Number of consecutive simulation matches to run in tournament mode.
+
+    Raises:
+        ValueError: If win_streak is not 5.
+    """
+    if win_streak != 5:
+        raise ValueError("Only 5-in-a-row is supported as a win condition on a 5x5 board")
+
     diff = difficulty.lower() if isinstance(difficulty, str) and difficulty.lower() in DIFFICULTY_MAP else "medium"
     cfg = DIFFICULTY_MAP[diff]
     search_depth = depth if depth is not None else cfg['depth']
@@ -105,13 +126,25 @@ def run_cli_match(
 
 
 def main():
+    """
+    Main CLI entrypoint parsing command-line flags and launching GUI or CLI simulation mode.
+
+    Flags:
+        --cli: If specified, runs headless CLI simulation match(es); otherwise launches Pygame GUI.
+        --difficulty: Selects AI difficulty preset ('easy', 'medium', 'hard').
+        --depth: Optional integer override for Minimax search tree depth.
+        --goal / --win-streak: Win condition alignment length (default 5).
+        --max-turns: Turn limit for CLI matches.
+        --opponent: Opponent mode for CLI ('random' or 'ai').
+        --matches: Number of automated matches to run in CLI mode.
+    """
     parser = argparse.ArgumentParser(description="5x5 Gobblet Gobblers with Minimax & Bounded Rationality")
     parser.add_argument("--cli", action="store_true", help="Run simulation match in CLI mode")
     parser.add_argument("--difficulty", choices=["easy", "medium", "hard"], default="medium",
                         help="AI difficulty level: easy (Depth 1, Memory 3), medium (Depth 2, Memory 5), hard (Depth 3, Memory 8)")
     parser.add_argument("--depth", type=int, default=None, help="Override AI Minimax search depth")
-    parser.add_argument("--goal", "--win-streak", dest="goal", type=int, choices=[4, 5], default=5,
-                        help="Win streak condition: 5-in-a-row (default) or 4-in-a-row")
+    parser.add_argument("--goal", "--win-streak", dest="goal", type=int, choices=[5], default=5,
+                        help="Win streak condition: 5-in-a-row")
     parser.add_argument("--max-turns", type=int, default=40, help="Maximum turns for CLI simulation match (default: 40)")
     parser.add_argument("--opponent", choices=["random", "ai"], default="random",
                         help="Opponent type in CLI simulation: 'random' (Pemain Acak / Random Player baseline) or 'ai' (Minimax AI)")

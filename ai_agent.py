@@ -9,7 +9,7 @@ Key features:
    - Buried pieces covered >5 moves ago are FORGOTTEN (treated as empty/unknown underneath in belief state).
 2. Minimax + Alpha-Beta Pruning:
    - Operates on the AI's internal belief state.
-   - Evaluates line potential (3-of-4, 2-of-4), center control, reserve dominance, and trap risks.
+   - Evaluates line potential (4-of-5, 3-of-5, 2-of-5), center control, reserve dominance, and trap risks.
 3. Live Decision Telemetry:
    - Emits structured events for every node visit, evaluation, alpha-beta cutoff, and candidate move.
    - Enables real-time visualization of search trees, pruned branches, and memory belief.
@@ -21,8 +21,8 @@ import time
 import math
 import threading
 from game_engine import (
-    GameState, Piece, Move, WINNING_LINES, WINNING_LINES_4, WINNING_LINES_5,
-    CELL_LINES_4, CELL_LINES_5,
+    GameState, Piece, Move, WINNING_LINES, WINNING_LINES_5,
+    CELL_LINES, CELL_LINES_5,
     PLAYER_BLUE, PLAYER_ORANGE, SIZE_SYMBOLS, SIZE_NAMES, PLAYER_NAMES
 )
 
@@ -30,10 +30,17 @@ from game_engine import (
 class RandomPlayer:
     """
     Simulated baseline opponent ('Pemain Acak') that selects legal moves uniformly at random.
-    Directly satisfies the Table 3 testing specification ('AI vs pemain acak').
+    Used for baseline benchmarking, simulation matches, and testing.
     """
 
     def __init__(self, player: int = PLAYER_BLUE, seed: Optional[int] = None):
+        """
+        Initializes the random baseline agent with player color and random seed.
+
+        Parameters:
+            player: The player color assignment (PLAYER_BLUE or PLAYER_ORANGE).
+            seed: Optional integer seed for deterministic pseudo-random action choices.
+        """
         self.player = player
         self.rng = random.Random(seed)
 
@@ -43,6 +50,20 @@ class RandomPlayer:
         step_callback: Optional[Callable[[str, Any], None]] = None,
         cancel_event: Optional[threading.Event] = None
     ) -> Optional[Move]:
+        """
+        Selects a legal move uniformly at random from available actions.
+
+        Acts as the benchmark opponent ('Pemain Acak') without heuristic evaluation
+        or game tree search. Respects cancellation signals if provided.
+
+        Parameters:
+            state: The current GameState of the match.
+            step_callback: Optional callback for telemetry events (unused by random agent).
+            cancel_event: Optional threading.Event to abort search early if flagged.
+
+        Returns:
+            A randomly selected Move object, or None if no legal moves exist.
+        """
         legal_moves = state.get_legal_moves(self.player)
         return self.rng.choice(legal_moves) if legal_moves else None
 
@@ -57,9 +78,19 @@ class MemoryInspector:
     @staticmethod
     def get_memory_snapshot(game_state: GameState, memory_window: int = 5) -> List[Dict[str, Any]]:
         """
-        Inspect all cells on the board that have buried pieces (depth > 1).
-        Determines if the buried pieces were covered within the last `memory_window` turns.
-        Returns a list of status dictionaries for GUI display.
+        Inspects all board cells with buried pieces to evaluate cognitive memory retention.
+
+        Iterates over cells with stack depth > 1 and compares the turn each underlying piece
+        was covered against the current turn. Pieces covered within `memory_window` turns
+        are flagged as remembered, while older buried pieces are classified as forgotten.
+
+        Parameters:
+            game_state: The current GameState being evaluated.
+            memory_window: The temporal threshold (in turns) for retaining memory of hidden pieces.
+
+        Returns:
+            A list of status dictionaries containing position, stack depth, piece references,
+            temporal age, remembered boolean flag, and formatted display strings for UI telemetry.
         """
         current_turn = game_state.turn_number
         memory_records = []
@@ -106,10 +137,21 @@ class MemoryInspector:
 
 def build_belief_state(real_state: GameState, memory_window: int = 5) -> GameState:
     """
-    Constructs the AI's internal belief state based on its bounded memory.
-    - Top pieces on the board are always visible.
-    - Buried pieces covered within the last `memory_window` moves are remembered.
-    - Buried pieces covered > `memory_window` moves ago are forgotten (omitted / empty underneath).
+    Constructs the AI's internal partially-observable belief state based on bounded memory.
+
+    Implements bounded rationality modeling:
+    - Visible top pieces across all cells are fully perceived.
+    - Buried pieces covered within the last `memory_window` turns are retained in memory
+      and included in the belief stack.
+    - Buried pieces covered more than `memory_window` turns ago are forgotten and omitted
+      from the belief state (treated as empty space underneath).
+
+    Parameters:
+        real_state: The true ground-truth GameState.
+        memory_window: The retention horizon (number of turns) for remembered covered pieces.
+
+    Returns:
+        A cloned GameState representing what the AI currently believes the board consists of.
     """
     belief = GameState(win_streak=real_state.win_streak)
     current_turn = real_state.turn_number
@@ -164,8 +206,30 @@ class AIHeuristic:
     @classmethod
     def evaluate(cls, state: GameState, ai_player: int = PLAYER_ORANGE) -> float:
         """
-        Returns a heuristic score.
-        Positive is favorable to ai_player (Orange), negative favorable to human (Blue).
+        Computes a comprehensive tactical static evaluation score for the board state.
+
+        Heuristic Components:
+        1. Terminal Win Detection:
+           - Immediately returns +10000.0 if ai_player has won, or -10000.0 if opponent won.
+        2. Line Potential & Gobble-Through Threats:
+           - Analyzes all winning lines for uncontested streaks (4-of-5, 3-of-5, etc.).
+           - Examines contested lines where an opponent's piece blocks a winning line but can be
+             gobbled through by a larger piece in reserves or elsewhere on the board.
+        3. Positional Center Control:
+           - Grants bonuses for controlling the central cell (2, 2) and the surrounding inner ring.
+        4. Reserve Dominance:
+           - Weights unplayed reserve pieces (Large = 20, Medium = 10, Small = 3) reflecting
+             their strategic value as responsive gobblers.
+        5. Uncover Trap Risk & Hidden Liability:
+           - Penalizes pinned friendly pieces that cover opponent pieces forming potential winning lines.
+           - Rewards setting latent traps where opponent pieces cover friendly pieces.
+
+        Parameters:
+            state: The GameState (or belief state) to evaluate.
+            ai_player: The player perspective to maximize (defaults to PLAYER_ORANGE).
+
+        Returns:
+            A floating-point evaluation score. Positive favors ai_player; negative favors opponent.
         """
         human_player = PLAYER_BLUE if ai_player == PLAYER_ORANGE else PLAYER_ORANGE
         board = state.board
@@ -174,9 +238,8 @@ class AIHeuristic:
         top_grid = [[board[r][c][-1] if board[r][c] else None for c in range(5)] for r in range(5)]
         top_sizes = [[top_grid[r][c].size if top_grid[r][c] else 0 for c in range(5)] for r in range(5)]
 
-        win_target = getattr(state, 'win_streak', 5)
-        winning_lines = WINNING_LINES_5 if win_target == 5 else WINNING_LINES_4
-        cell_lines_dict = CELL_LINES_5 if win_target == 5 else CELL_LINES_4
+        winning_lines = WINNING_LINES_5
+        cell_lines_dict = CELL_LINES_5
 
         # Fast winner check on board
         blue_wins = []
@@ -236,99 +299,64 @@ class AIHeuristic:
 
             # If line is uncontested by opponent:
             if human_count == 0 and ai_count > 0:
-                if win_target == 5:
-                    if ai_count >= 4:
-                        score += 650.0  # 4-of-5: Immediate winning threat on next turn!
-                    elif ai_count == 3:
-                        score += 150.0  # 3-of-5: Strong threat & critical fork setup
-                    elif ai_count == 2:
-                        score += 28.0   # 2-of-5
-                    elif ai_count >= 1:
-                        score += 6.0    # 1-of-5
-                else:
-                    if ai_count == win_target - 1:
-                        score += 250.0  # One move away from win!
-                    elif ai_count == win_target - 2:
-                        score += 45.0
-                    elif ai_count >= 1:
-                        score += 8.0
+                if ai_count >= 4:
+                    score += 650.0  # 4-of-5: Immediate winning threat on next turn!
+                elif ai_count == 3:
+                    score += 150.0  # 3-of-5: Strong threat & critical fork setup
+                elif ai_count == 2:
+                    score += 28.0   # 2-of-5
+                elif ai_count >= 1:
+                    score += 6.0    # 1-of-5
 
             elif ai_count == 0 and human_count > 0:
-                if win_target == 5:
-                    if human_count >= 4:
-                        score -= 820.0  # 4-of-5: Immediate lethal danger! Must block
-                    elif human_count == 3:
-                        score -= 170.0  # 3-of-5: Severe human threat
-                    elif human_count == 2:
-                        score -= 32.0   # 2-of-5
-                    elif human_count >= 1:
-                        score -= 8.0    # 1-of-5
-                else:
-                    if human_count == win_target - 1:
-                        score -= 300.0  # Immediate danger! Must block
-                    elif human_count == win_target - 2:
-                        score -= 55.0
-                    elif human_count >= 1:
-                        score -= 10.0
+                if human_count >= 4:
+                    score -= 820.0  # 4-of-5: Immediate lethal danger! Must block
+                elif human_count == 3:
+                    score -= 170.0  # 3-of-5: Severe human threat
+                elif human_count == 2:
+                    score -= 32.0   # 2-of-5
+                elif human_count >= 1:
+                    score -= 8.0    # 1-of-5
 
             # Contested lines: check for active gobble-through threats
             elif ai_count > 0 and human_count > 0:
-                if win_target == 5:
-                    if human_count == 4 and ai_count == 1:
-                        # 4 human pieces blocked by 1 AI piece: check if human can gobble it!
-                        ai_pos_size = ai_pieces[0][2]
-                        can_gobble = (max_human_res_size > ai_pos_size) or any(
-                            top_sizes[br][bc] > ai_pos_size
-                            for br in range(5) for bc in range(5)
-                            if (br, bc) not in line and top_grid[br][bc] and top_grid[br][bc].player == human_player
-                        )
-                        if can_gobble:
-                            score -= 780.0  # Human can gobble this piece and win immediately!
-                        else:
-                            score += 20.0   # Solid secure block by AI Large piece
-                    elif ai_count == 4 and human_count == 1:
-                        # 4 AI pieces blocked by 1 human piece: check if AI can gobble it!
-                        human_pos_size = human_pieces[0][2]
-                        can_gobble = (max_ai_res_size > human_pos_size) or any(
-                            top_sizes[br][bc] > human_pos_size
-                            for br in range(5) for bc in range(5)
-                            if (br, bc) not in line and top_grid[br][bc] and top_grid[br][bc].player == ai_player
-                        )
-                        if can_gobble:
-                            score += 620.0  # AI can gobble and win on next turn!
-                        else:
-                            score -= 20.0
-                    elif human_count == 3 and ai_count == 1 and empty_count == 1:
-                        # 3 human + 1 AI (gobbleable) + 1 empty
-                        ai_pos_size = ai_pieces[0][2]
-                        if max_human_res_size > ai_pos_size:
-                            score -= 140.0  # Live 3-of-5 threat
-                    elif ai_count == 3 and human_count == 1 and empty_count == 1:
-                        # 3 AI + 1 human (gobbleable) + 1 empty
-                        human_pos_size = human_pieces[0][2]
-                        if max_ai_res_size > human_pos_size:
-                            score += 125.0  # Live 3-of-5 threat
+                if human_count == 4 and ai_count == 1:
+                    # 4 human pieces blocked by 1 AI piece: check if human can gobble it!
+                    ai_pos_size = ai_pieces[0][2]
+                    can_gobble = (max_human_res_size > ai_pos_size) or any(
+                        top_sizes[br][bc] > ai_pos_size
+                        for br in range(5) for bc in range(5)
+                        if (br, bc) not in line and top_grid[br][bc] and top_grid[br][bc].player == human_player
+                    )
+                    if can_gobble:
+                        score -= 780.0  # Human can gobble this piece and win immediately!
                     else:
-                        diff = ai_count - human_count
-                        score += diff * 5.0
+                        score += 20.0   # Solid secure block by AI Large piece
+                elif ai_count == 4 and human_count == 1:
+                    # 4 AI pieces blocked by 1 human piece: check if AI can gobble it!
+                    human_pos_size = human_pieces[0][2]
+                    can_gobble = (max_ai_res_size > human_pos_size) or any(
+                        top_sizes[br][bc] > human_pos_size
+                        for br in range(5) for bc in range(5)
+                        if (br, bc) not in line and top_grid[br][bc] and top_grid[br][bc].player == ai_player
+                    )
+                    if can_gobble:
+                        score += 620.0  # AI can gobble and win on next turn!
+                    else:
+                        score -= 20.0
+                elif human_count == 3 and ai_count == 1 and empty_count == 1:
+                    # 3 human + 1 AI (gobbleable) + 1 empty
+                    ai_pos_size = ai_pieces[0][2]
+                    if max_human_res_size > ai_pos_size:
+                        score -= 140.0  # Live 3-of-5 threat
+                elif ai_count == 3 and human_count == 1 and empty_count == 1:
+                    # 3 AI + 1 human (gobbleable) + 1 empty
+                    human_pos_size = human_pieces[0][2]
+                    if max_ai_res_size > human_pos_size:
+                        score += 125.0  # Live 3-of-5 threat
                 else:
-                    if human_count == win_target - 1 and ai_count == 1:
-                        ai_pos_size = ai_pieces[0][2]
-                        can_gobble = (max_human_res_size > ai_pos_size)
-                        if can_gobble:
-                            score -= 280.0
-                        else:
-                            score += 15.0
-                    elif ai_count == win_target - 1 and human_count == 1:
-                        human_pos_size = human_pieces[0][2]
-                        can_gobble = (max_ai_res_size > human_pos_size)
-                        if can_gobble:
-                            score += 230.0
-                        else:
-                            score -= 15.0
-                    else:
-                        diff = ai_count - human_count
-                        score += diff * 5.0
+                    diff = ai_count - human_count
+                    score += diff * 5.0
 
         # 2. Board Positional Advantage (Center control)
         top_center = top_grid[2][2]
@@ -367,22 +395,14 @@ class AIHeuristic:
                                     top = top_grid[lr][lc]
                                     if top and top.player == human_player:
                                         human_in_line += 1
-                            if win_target == 5:
-                                if human_in_line >= 4:
-                                    score -= 750.0
-                                elif human_in_line == 3:
-                                    score -= 180.0
-                                elif human_in_line == 2:
-                                    score -= 50.0
-                                elif human_in_line >= 1:
-                                    score -= 15.0
-                            else:
-                                if human_in_line == win_target - 1:
-                                    score -= 450.0
-                                elif human_in_line == win_target - 2:
-                                    score -= 90.0
-                                elif human_in_line >= 1:
-                                    score -= 20.0
+                            if human_in_line >= 4:
+                                score -= 750.0
+                            elif human_in_line == 3:
+                                score -= 180.0
+                            elif human_in_line == 2:
+                                score -= 50.0
+                            elif human_in_line >= 1:
+                                score -= 15.0
 
                     # Case B: Human piece covers an AI piece (Latent trap set for human!)
                     elif top_piece.player == human_player and covered_piece.player == ai_player:
@@ -393,22 +413,14 @@ class AIHeuristic:
                                     top = top_grid[lr][lc]
                                     if top and top.player == ai_player:
                                         ai_in_line += 1
-                            if win_target == 5:
-                                if ai_in_line >= 4:
-                                    score += 600.0
-                                elif ai_in_line == 3:
-                                    score += 150.0
-                                elif ai_in_line == 2:
-                                    score += 40.0
-                                elif ai_in_line >= 1:
-                                    score += 10.0
-                            else:
-                                if ai_in_line == win_target - 1:
-                                    score += 350.0
-                                elif ai_in_line == win_target - 2:
-                                    score += 80.0
-                                elif ai_in_line >= 1:
-                                    score += 15.0
+                            if ai_in_line >= 4:
+                                score += 600.0
+                            elif ai_in_line == 3:
+                                score += 150.0
+                            elif ai_in_line == 2:
+                                score += 40.0
+                            elif ai_in_line >= 1:
+                                score += 10.0
 
                     # Case C: Friendly stack (AI piece covers AI piece)
                     elif top_piece.player == ai_player and covered_piece.player == ai_player:
@@ -421,10 +433,24 @@ class SearchTelemetry:
     """Holds real-time search state and decision logs for the live GUI panel (thread-safe)."""
 
     def __init__(self):
+        """
+        Serves as the constructor and thread-safe state container initializer for SearchTelemetry.
+
+        Establishes the mutual exclusion primitive (`threading.Lock`) used to synchronize shared
+        search state between background Minimax computation threads and the main GUI rendering thread
+        (60 FPS event loop). Immediately delegates to `reset()` to initialize all search counters,
+        timing trackers, candidate score maps, pruned branch logs, and cognitive memory snapshots.
+        """
         self.lock = threading.Lock()
         self.reset()
 
     def reset(self):
+        """
+        Resets all real-time search metrics and candidate move tables to their baseline states.
+
+        Clears node visit counters, prune counters, timers, candidate move score maps,
+        current search branch trails, and memory snapshots.
+        """
         with self.lock:
             self.is_searching: bool = False
             self.current_depth: int = 0
@@ -444,27 +470,78 @@ class SearchTelemetry:
             self.memory_snapshot: List[Dict[str, Any]] = []
 
     def get_candidate_scores_copy(self) -> List[Tuple[str, float]]:
+        """
+        Thread-safely acquires and returns a shallow copy of root candidate moves and scores.
+
+        Returns:
+            A list of (move_str, evaluation_score) tuples representing root actions explored so far.
+        """
         with self.lock:
             return list(self.candidate_scores.items())
 
     def get_pruned_branches_copy(self) -> List[str]:
+        """
+        Thread-safely acquires and returns a shallow copy of logged Alpha-Beta pruning cutoff events.
+
+        Returns:
+            A list of formatted strings describing recent cutoff occurrences and threshold values.
+        """
         with self.lock:
             return list(self.pruned_branches)
 
     def get_current_branch_copy(self) -> List[str]:
+        """
+        Thread-safely acquires and returns a shallow copy of the active search tree branch path.
+
+        Returns:
+            A list of move strings forming the sequence from root to the currently explored node.
+        """
         with self.lock:
             return list(self.current_branch)
 
     def get_memory_snapshot_copy(self) -> List[Dict[str, Any]]:
+        """
+        Thread-safely acquires and returns a copy of the AI cognitive memory status records.
+
+        Returns:
+            A list of dictionaries describing buried pieces, temporal ages, and retention states.
+        """
         with self.lock:
             return list(self.memory_snapshot)
 
 
 def order_moves_heuristically(moves: List[Move]) -> None:
-    """Fast integer-score move ordering for early alpha-beta cutoffs."""
+    """
+    Sorts moves in-place using a lightweight tactical heuristic to optimize Alpha-Beta pruning.
+
+    Orders moves by piece size (preferring larger drops/gobbles) and central board positioning
+    (center cell (2, 2) and inner ring cells). Prioritizing high-utility moves increases the
+    likelihood of early alpha-beta cutoffs, significantly pruning the game tree search space.
+
+    Parameters:
+        moves: The list of Move objects to be ordered in-place.
+    """
     inner_ring = AIHeuristic.INNER_RING
 
     def move_score(m: Move) -> int:
+        """
+        Serves as the internal heuristic ranking function for Alpha-Beta move ordering.
+
+        Computes an integer utility score to sort moves in descending order of tactical priority
+        before expanding search tree branches. Prioritizes:
+        1. Piece size dominance: `(m.size or 0) * 10` favors larger pieces that dominate/gobble cells.
+        2. Strategic board centrality: +5 bonus for the pivotal center cell (2, 2) and +2 bonus for
+           the surrounding inner ring cells.
+
+        By evaluating the strongest moves first, Alpha-Beta pruning maximizes the frequency of beta
+        cutoffs, substantially shrinking the branching factor and search latency.
+
+        Parameters:
+            m: The Move instance being scored.
+
+        Returns:
+            An integer heuristic score used as the sorting key.
+        """
         sc = (m.size or 0) * 10
         to_pos = m.to_pos
         if to_pos == (2, 2):
@@ -490,6 +567,17 @@ class MinimaxAgent:
         telemetry: Optional[SearchTelemetry] = None,
         enable_pruning: bool = True
     ):
+        """
+        Initializes the Minimax AI Agent with Alpha-Beta pruning and bounded rationality.
+
+        Parameters:
+            player: Player assignment (PLAYER_ORANGE by default).
+            max_depth: Maximum ply depth for minimax game tree exploration (e.g. 1, 2, or 3).
+            memory_window: Number of turns hidden pieces remain remembered in the belief state.
+            telemetry: Shared SearchTelemetry instance for live GUI metrics streaming.
+            enable_pruning: Flag enabling Alpha-Beta branch cutoffs (True for standard play;
+                            can be disabled to benchmark against Pure Minimax).
+        """
         self.player = player
         self.max_depth = max_depth
         self.memory_window = memory_window
@@ -504,9 +592,23 @@ class MinimaxAgent:
         cancel_event: Optional[threading.Event] = None
     ) -> Optional[Move]:
         """
-        Executes Minimax search on the AI's internal belief state.
-        Calls step_callback to provide real-time telemetry updates.
-        Returns the chosen Move.
+        Executes the root Minimax search on the AI's internal belief state to select the best move.
+
+        Process:
+        1. Captures memory snapshot and constructs the bounded rationality belief state.
+        2. Gathers and heuristically orders all legal moves available to the AI.
+        3. Evaluates each candidate move by simulating the action and exploring the game tree
+           via `_min_value`, updating alpha bounds.
+        4. Dispatches live telemetry events via `step_callback` for UI visualization.
+        5. Supports graceful search cancellation if `cancel_event` is signaled.
+
+        Parameters:
+            real_state: The actual ground-truth GameState.
+            step_callback: Optional callable for streaming real-time search events to GUI.
+            cancel_event: Optional threading.Event to abort calculation prematurely.
+
+        Returns:
+            The optimal Move selected by Minimax, or None if no legal moves exist.
         """
         search_depth = self.max_depth
         search_memory = self.memory_window
@@ -633,6 +735,26 @@ class MinimaxAgent:
         search_depth: Optional[int] = None,
         cancel_event: Optional[threading.Event] = None
     ) -> float:
+        """
+        Executes the maximizing step of the Minimax algorithm (AI's turn).
+
+        Explores all legal moves for `self.player`, recursively calling `_min_value`
+        to evaluate opponent responses. Applies Alpha-Beta pruning when the current evaluation
+        exceeds or equals beta.
+
+        Parameters:
+            state: The current GameState node in the search tree.
+            depth: Current ply depth in the tree.
+            alpha: Current best lower bound achieved by the maximizer.
+            beta: Current best upper bound achieved by the minimizer.
+            path: Move sequence history leading to this node.
+            step_callback: Telemetry streaming callback.
+            search_depth: Maximum depth limit for the active search.
+            cancel_event: Abort signal flag.
+
+        Returns:
+            The maximum evaluated heuristic score for this node.
+        """
         if cancel_event and cancel_event.is_set():
             return 0.0
 
@@ -716,6 +838,26 @@ class MinimaxAgent:
         search_depth: Optional[int] = None,
         cancel_event: Optional[threading.Event] = None
     ) -> float:
+        """
+        Executes the minimizing step of the Minimax algorithm (Human opponent's turn).
+
+        Explores all legal moves for the opponent, recursively calling `_max_value`
+        to evaluate AI counter-moves. Applies Alpha-Beta pruning when the current evaluation
+        drops below or equals alpha.
+
+        Parameters:
+            state: The current GameState node in the search tree.
+            depth: Current ply depth in the tree.
+            alpha: Current best lower bound achieved by the maximizer.
+            beta: Current best upper bound achieved by the minimizer.
+            path: Move sequence history leading to this node.
+            step_callback: Telemetry streaming callback.
+            search_depth: Maximum depth limit for the active search.
+            cancel_event: Abort signal flag.
+
+        Returns:
+            The minimum evaluated heuristic score for this node.
+        """
         if cancel_event and cancel_event.is_set():
             return 0.0
 

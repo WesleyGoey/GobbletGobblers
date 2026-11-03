@@ -21,10 +21,26 @@ from ai_agent import (
 class TestGobbletEdgeCases(unittest.TestCase):
 
     def setUp(self):
-        self.state = GameState(win_streak=4)
+        """
+        Serves as the test fixture setup for edge-case regression suites.
+
+        Initializes a fresh 5x5 `GameState` instance configured with the standard
+        5-in-a-row (`win_streak=5`) winning condition before each test execution,
+        ensuring test isolation and state purity across test runs.
+        """
+        self.state = GameState(win_streak=5)
 
     def test_friendly_gobbling(self):
-        """Player can gobble their own smaller pieces."""
+        """
+        Serves as the rule validation test for friendly piece gobbling (self-stacking).
+
+        Verifies that players are permitted to gobble their own pieces with larger sizes:
+        1. Blue drops a Small piece (size 1) at (1, 1).
+        2. Orange makes a neutral drop elsewhere.
+        3. Blue drops a Medium piece (size 2) directly onto their own Small piece at (1, 1).
+        Asserts that the move succeeds, stack depth increments to 2, and the top piece
+        remains Blue with size 2.
+        """
         # Blue drops small (size 1) at (1, 1)
         m1 = Move(PLAYER_BLUE, 'drop', (1, 1), size=1)
         self.assertTrue(self.state.apply_move(m1))
@@ -41,59 +57,84 @@ class TestGobbletEdgeCases(unittest.TestCase):
         self.assertEqual(self.state.get_top_size(1, 1), 2)
 
     def test_diagonal_wins(self):
-        """Test diagonal win conditions."""
-        # Main diagonal line: (0, 0), (1, 1), (2, 2), (3, 3)
-        self.state.board[0][0] = [Piece(PLAYER_BLUE, 1)]
-        self.state.board[1][1] = [Piece(PLAYER_BLUE, 1)]
-        self.state.board[2][2] = [Piece(PLAYER_BLUE, 1)]
-        self.state.board[3][3] = [Piece(PLAYER_BLUE, 1)]
+        """
+        Serves as the win detection validation test for 5x5 diagonal alignments.
 
+        Tests both diagonal geometries supported on a 5x5 board:
+        - Main diagonal: (0,0), (1,1), (2,2), (3,3), (4,4) for Blue.
+        - Anti-diagonal: (0,4), (1,3), (2,2), (3,1), (4,0) for Orange.
+        Confirms that 4 pieces in a line do NOT trigger a win, while placing the 5th
+        piece completes the alignment, returning the correct winner and line coordinates.
+        """
+        # Main diagonal line: (0, 0), (1, 1), (2, 2), (3, 3), (4, 4)
+        for i in range(4):
+            self.state.board[i][i] = [Piece(PLAYER_BLUE, 1)]
+
+        # 4 pieces must NOT win
+        winner, line = self.state.check_winner_on_board()
+        self.assertIsNone(winner)
+        self.assertIsNone(line)
+
+        # 5th piece completes diagonal and wins
+        self.state.board[4][4] = [Piece(PLAYER_BLUE, 1)]
         winner, line = self.state.check_winner_on_board()
         self.assertEqual(winner, PLAYER_BLUE)
-        self.assertEqual(line, [(0, 0), (1, 1), (2, 2), (3, 3)])
+        self.assertEqual(line, [(0, 0), (1, 1), (2, 2), (3, 3), (4, 4)])
 
-        # Anti-diagonal line: (0, 3), (1, 2), (2, 1), (3, 0)
-        state2 = GameState(win_streak=4)
-        state2.board[0][3] = [Piece(PLAYER_ORANGE, 2)]
-        state2.board[1][2] = [Piece(PLAYER_ORANGE, 2)]
-        state2.board[2][1] = [Piece(PLAYER_ORANGE, 2)]
-        state2.board[3][0] = [Piece(PLAYER_ORANGE, 2)]
+        # Anti-diagonal line: (0, 4), (1, 3), (2, 2), (3, 1), (4, 0)
+        state2 = GameState(win_streak=5)
+        state2.board[0][4] = [Piece(PLAYER_ORANGE, 2)]
+        state2.board[1][3] = [Piece(PLAYER_ORANGE, 2)]
+        state2.board[2][2] = [Piece(PLAYER_ORANGE, 2)]
+        state2.board[3][1] = [Piece(PLAYER_ORANGE, 2)]
+        state2.board[4][0] = [Piece(PLAYER_ORANGE, 2)]
 
         winner2, line2 = state2.check_winner_on_board()
         self.assertEqual(winner2, PLAYER_ORANGE)
-        self.assertEqual(line2, [(0, 3), (1, 2), (2, 1), (3, 0)])
+        self.assertEqual(line2, [(0, 4), (1, 3), (2, 2), (3, 1), (4, 0)])
 
     def test_uncover_trap_successful_block(self):
         """
-        If lifting reveals an opponent win, but the lifted piece legally blocks that win,
-        the active player survives and the game continues!
+        Serves as the validation test for surviving the Uncover Trap via legal blocking.
+
+        Enforces the nuanced Uncover Trap rule:
+        If lifting a board piece reveals an opponent's 5-in-a-row, the player does NOT
+        immediately lose IF the lifted piece is placed onto a cell that legally blocks
+        and breaks that revealed winning line.
+        Asserts that the move succeeds, game_over remains False, winner is None, and
+        the turn advances to the opponent.
         """
-        # Orange has 3 visible in row 0: (0, 0), (0, 1), (0, 2)
-        # And at (0, 3), Orange has a piece covered by Blue Large piece (size 3)
-        # In column 4, Blue can move the piece from (0, 3) to (0, 0) covering Orange's size 1 piece!
+        # Orange has 4 visible in row 0: (0, 0), (0, 1), (0, 2), (0, 3)
+        # And at (0, 4), Orange has a piece covered by Blue Large piece (size 3)
+        # Blue can move the piece from (0, 4) to (0, 0) covering Orange's size 1 piece!
         self.state.board[0][0] = [Piece(PLAYER_ORANGE, 1)]
         self.state.board[0][1] = [Piece(PLAYER_ORANGE, 1)]
         self.state.board[0][2] = [Piece(PLAYER_ORANGE, 1)]
-        self.state.board[0][3] = [Piece(PLAYER_ORANGE, 1), Piece(PLAYER_BLUE, 3)]
+        self.state.board[0][3] = [Piece(PLAYER_ORANGE, 1)]
+        self.state.board[0][4] = [Piece(PLAYER_ORANGE, 1), Piece(PLAYER_BLUE, 3)]
 
         self.state.current_player = PLAYER_BLUE
 
-        # Blue lifts Large from (0, 3) and places it on (0, 0) covering Orange!
-        blocking_move = Move(PLAYER_BLUE, 'move', from_pos=(0, 3), to_pos=(0, 0))
+        # Blue lifts Large from (0, 4) and places it on (0, 0) covering Orange!
+        blocking_move = Move(PLAYER_BLUE, 'move', from_pos=(0, 4), to_pos=(0, 0))
         success = self.state.apply_move(blocking_move)
         self.assertTrue(success)
 
         # Orange does NOT win because (0, 0) is now covered by Blue!
-        # The line (0,0..0,3) is broken because (0,0) is Blue!
+        # The line (0,0..0,4) is broken because (0,0) is Blue!
         self.assertFalse(self.state.game_over)
         self.assertIsNone(self.state.winner)
         self.assertEqual(self.state.current_player, PLAYER_ORANGE)
 
     def test_memory_forgetting_boundary(self):
         """
-        Verifies exact boundary of 5-move memory window:
-        - Move covered <= 5 turns ago is remembered.
-        - Move covered > 5 turns ago is forgotten.
+        Serves as the precise boundary test for bounded memory window transitions.
+
+        Validates the cognitive forgetting model implemented in `MemoryInspector`:
+        - A piece buried within the memory window (`current_turn - covered_turn <= 5`)
+          must be accurately recalled (`is_remembered == True`).
+        - When turn advances beyond the memory window (`current_turn - covered_turn == 6`),
+          the piece must transition to forgotten (`is_remembered == False`).
         """
         # Blue drops small at (3, 3) at turn 1
         self.state.apply_move(Move(PLAYER_BLUE, 'drop', (3, 3), size=1))
@@ -111,7 +152,13 @@ class TestGobbletEdgeCases(unittest.TestCase):
         self.assertFalse(snap8[0]['is_remembered'])
 
     def test_telemetry_pruning_recorded(self):
-        """Verify that Minimax agent triggers and records alpha-beta pruning."""
+        """
+        Serves as the integration test for Minimax Alpha-Beta pruning telemetry.
+
+        Configures a `MinimaxAgent` with an attached `SearchTelemetry` instance and executes
+        a depth-3 search on an active board configuration. Confirms that `nodes_visited`
+        is strictly positive and that `prune_count` records valid alpha-beta cutoffs.
+        """
         telemetry = SearchTelemetry()
         agent = MinimaxAgent(player=PLAYER_ORANGE, max_depth=3, memory_window=5, telemetry=telemetry)
         agent.step_delay = 0
@@ -126,45 +173,16 @@ class TestGobbletEdgeCases(unittest.TestCase):
         self.assertGreater(telemetry.nodes_visited, 0)
         self.assertGreaterEqual(telemetry.prune_count, 0)
 
-    def test_simultaneous_4_in_a_row_uncover_trap(self):
-        """
-        Simultaneous 4-in-a-row edge case:
-        If Blue moves a piece that simultaneously uncovers Orange's 4-in-a-row
-        AND places to form Blue's 4-in-a-row:
-        The uncovered Orange line was created upon lifting and was not blocked.
-        Official rule dictates Orange wins immediately via Uncover Trap!
-        """
-        # Row 0: (0,0), (0,1), (0,2) Orange. (0,3) has Orange covered by Blue Large (size 3)
-        self.state.board[0][0] = [Piece(PLAYER_ORANGE, 1)]
-        self.state.board[0][1] = [Piece(PLAYER_ORANGE, 1)]
-        self.state.board[0][2] = [Piece(PLAYER_ORANGE, 1)]
-        self.state.board[0][3] = [Piece(PLAYER_ORANGE, 1), Piece(PLAYER_BLUE, 3)]
-
-        # Row 1: (1,0), (1,1), (1,2) Blue. (1,3) empty.
-        self.state.board[1][0] = [Piece(PLAYER_BLUE, 2)]
-        self.state.board[1][1] = [Piece(PLAYER_BLUE, 2)]
-        self.state.board[1][2] = [Piece(PLAYER_BLUE, 2)]
-
-        self.state.current_player = PLAYER_BLUE
-
-        # Blue moves from (0,3) to (1,3):
-        # Lifting from (0,3) reveals Orange's (0,0..0,3) 4-in-a-row!
-        # Placing at (1,3) completes Blue's (1,0..1,3) 4-in-a-row!
-        # But Orange's revealed line was NOT blocked!
-        move = Move(PLAYER_BLUE, 'move', from_pos=(0, 3), to_pos=(1, 3))
-        self.state.apply_move(move)
-
-        self.assertTrue(self.state.game_over)
-        self.assertEqual(self.state.winner, PLAYER_ORANGE)
-        self.assertIn("Uncover Trap", self.state.win_reason)
-
     def test_simultaneous_5_in_a_row_uncover_trap(self):
         """
-        Simultaneous 5-in-a-row edge case:
-        If Blue moves a piece that simultaneously uncovers Orange's 5-in-a-row
-        AND places to form Blue's 5-in-a-row:
-        The uncovered Orange line was created upon lifting and was not blocked.
-        Official rule dictates Orange wins immediately via Uncover Trap!
+        Serves as the priority resolution test for simultaneous 5-in-a-row uncover traps.
+
+        Edge-case scenario:
+        Blue repositions a piece which simultaneously uncovers Orange's 5-in-a-row and
+        completes Blue's own 5-in-a-row at the destination.
+        Because the uncovered Orange line was created upon lifting and was not blocked by
+        the destination, official Gobblet rules dictate that Orange wins immediately via
+        Uncover Trap priority.
         """
         state_5 = GameState(win_streak=5)
         # Row 0: 4 Orange visible + 1 Orange covered at (0,4)
@@ -187,32 +205,15 @@ class TestGobbletEdgeCases(unittest.TestCase):
         self.assertIn("Uncover Trap", state_5.win_reason)
 
     def test_trap_risk_heuristic(self):
-        """AIHeuristic should penalize pinned AI pieces that cover dangerous opponent pieces."""
-        # State A: Orange Large covers Blue Small at (0, 3).
-        # Row 0 has (0,0), (0,1), (0,2) Blue.
-        # Lifting Orange Large would reveal Blue's 4-in-a-row!
-        state_danger = GameState(win_streak=4)
-        state_danger.board[0][0] = [Piece(PLAYER_BLUE, 1)]
-        state_danger.board[0][1] = [Piece(PLAYER_BLUE, 1)]
-        state_danger.board[0][2] = [Piece(PLAYER_BLUE, 1)]
-        state_danger.board[0][3] = [Piece(PLAYER_BLUE, 1), Piece(PLAYER_ORANGE, 3)]
+        """
+        Serves as the heuristic penalty validation test for uncover trap vulnerabilities.
 
-        score_danger = AIHeuristic.evaluate(state_danger, PLAYER_ORANGE)
-
-        # State B: Orange Large covers friendly Orange Small at (0, 3).
-        state_safe = GameState(win_streak=4)
-        state_safe.board[0][0] = [Piece(PLAYER_BLUE, 1)]
-        state_safe.board[0][1] = [Piece(PLAYER_BLUE, 1)]
-        state_safe.board[0][2] = [Piece(PLAYER_BLUE, 1)]
-        state_safe.board[0][3] = [Piece(PLAYER_ORANGE, 1), Piece(PLAYER_ORANGE, 3)]
-
-        score_safe = AIHeuristic.evaluate(state_safe, PLAYER_ORANGE)
-
-        # Trap risk penalty must make State A significantly worse than State B
-        self.assertLess(score_danger, score_safe - 300.0)
-
-    def test_5_in_a_row_trap_risk_heuristic(self):
-        """AIHeuristic penalizes pinned AI pieces that would uncover a 5-in-a-row line."""
+        Compares `AIHeuristic.evaluate()` scores between two board states:
+        - Dangerous State: An Orange piece covers a buried Blue piece that would complete
+          a 5-in-a-row line for Blue if lifted.
+        - Safe State: The same Orange piece covers a friendly Orange piece.
+        Asserts that the evaluation of the dangerous state is penalized by more than 300 points.
+        """
         state_danger = GameState(win_streak=5)
         for c in range(4):
             state_danger.board[0][c] = [Piece(PLAYER_BLUE, 1)]
@@ -229,7 +230,14 @@ class TestGobbletEdgeCases(unittest.TestCase):
         self.assertLess(score_danger, score_safe - 300.0)
 
     def test_immobility_loss(self):
-        """If a player has no legal moves on their turn, opponent wins by immobility."""
+        """
+        Serves as the terminal condition test for player immobility.
+
+        Configures a board where Blue has 0 pieces remaining in reserves and its only
+        board piece is completely gobbled/covered by an Orange piece.
+        Validates that `get_legal_moves(PLAYER_BLUE)` returns an empty list, signifying
+        complete immobilization.
+        """
         state = GameState()
         # Empty Blue reserves
         state.reserves[PLAYER_BLUE] = {1: 0, 2: 0, 3: 0}

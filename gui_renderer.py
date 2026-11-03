@@ -24,7 +24,20 @@ from game_engine import (
 
 # --- Helper Functions ---
 def lerp_color(c1: Tuple[int, int, int], c2: Tuple[int, int, int], t: float) -> Tuple[int, int, int]:
-    """Linearly interpolate between two RGB colors with t clamped in [0.0, 1.0]."""
+    """
+    Linearly interpolates between two RGB color tuples.
+
+    Clamps the interpolation factor `t` to the [0.0, 1.0] range to ensure valid RGB channels.
+    Used for smooth hover transitions and responsive UI animations.
+
+    Parameters:
+        c1: Starting RGB color tuple (r, g, b).
+        c2: Target RGB color tuple (r, g, b).
+        t: Interpolation factor (0.0 returns c1, 1.0 returns c2).
+
+    Returns:
+        Interpolated (r, g, b) integer color tuple.
+    """
     t = max(0.0, min(1.0, t))
     return (
         int(c1[0] + (c2[0] - c1[0]) * t),
@@ -37,10 +50,31 @@ class TextSurfaceCache:
     """Caches rendered font glyph surfaces to prevent redundant FreeType rasterization."""
 
     def __init__(self, max_entries: int = 500):
+        """
+        Initializes the text glyph cache with a bounded maximum capacity.
+
+        Parameters:
+            max_entries: Maximum number of rasterized glyph surfaces to retain
+                         before clearing to prevent memory leaks.
+        """
         self.cache: Dict[Tuple[int, str, Tuple[int, int, int]], pygame.Surface] = {}
         self.max_entries = max_entries
 
     def render(self, font: pygame.font.Font, text: str, color: Tuple[int, int, int]) -> pygame.Surface:
+        """
+        Retrieves a cached text surface or renders and caches a new one via FreeType.
+
+        Indexed by font ID, text content, and color tuple to avoid redundant rendering
+        overhead during 60 FPS drawing loops.
+
+        Parameters:
+            font: Pygame Font instance used for glyph rendering.
+            text: String content to display.
+            color: RGB color tuple for text.
+
+        Returns:
+            A hardware-accelerated pygame.Surface containing the rendered text.
+        """
         key = (id(font), text, color)
         surf = self.cache.get(key)
         if surf is None:
@@ -55,17 +89,48 @@ class PieceSpriteCache:
     """Pre-renders and caches 12 static 3D tactile Gobbler figurine surfaces."""
 
     def __init__(self, piece_radii: Dict[int, int]):
+        """
+        Initializes the flyweight sprite cache for Gobbler figurines.
+
+        Parameters:
+            piece_radii: Mapping of piece size tier (1, 2, 3) to base pixel radius.
+        """
         self.piece_radii = piece_radii
         self.sprites: Dict[Tuple[int, int, bool], pygame.Surface] = {}
         self._pre_render_all()
 
     def _pre_render_all(self):
+        """
+        Pre-renders all 12 figurine sprite permutations into memory at startup.
+
+        Generates 2 players x 3 size tiers x 2 states (active vs depleted/disabled),
+        eliminating thousands of vector circle and arc draw calls per animation frame.
+        """
         for player in (PLAYER_BLUE, PLAYER_ORANGE):
             for size in (1, 2, 3):
                 for is_disabled in (False, True):
                     self.sprites[(player, size, is_disabled)] = self._build_sprite(player, size, is_disabled)
 
     def _build_sprite(self, player: int, size: int, is_disabled: bool) -> pygame.Surface:
+        """
+        Builds a high-fidelity 3D tactile figurine sprite onto a transparent 32-bit surface.
+
+        Renders multi-layer vector elements:
+        1. Translucent drop shadow ellipses for grounding depth.
+        2. Player-branded color gradients (Blue/Orange) or muted gray disabled tones.
+        3. Sculpted top crown tufts matching piece size (1, 2, or 3 tufts).
+        4. Main dome body with spherical radial volume highlights and specular glints.
+        5. Soft rosy cheek blush circles for character warmth.
+        6. Stylized cartoon eyes with pupils, white catchlights, and distinct facial expressions.
+
+        Parameters:
+            player: PLAYER_BLUE (1) or PLAYER_ORANGE (2).
+            size: Size tier (1 = Small, 2 = Medium, 3 = Large).
+            is_disabled: True if rendering an inactive/depleted reserve silhouette.
+
+        Returns:
+            A pygame.Surface with transparent alpha channel containing the figurine sprite.
+        """
         radius = self.piece_radii[size]
         w = radius * 2 + 24
         h = radius * 2 + 24
@@ -173,6 +238,17 @@ class PieceSpriteCache:
         return surf
 
     def get_sprite(self, player: int, size: int, is_disabled: bool = False) -> pygame.Surface:
+        """
+        Returns the pre-rendered sprite surface for the specified piece variant in O(1) time.
+
+        Parameters:
+            player: PLAYER_BLUE or PLAYER_ORANGE.
+            size: Size tier (1, 2, or 3).
+            is_disabled: Depleted reserve state flag.
+
+        Returns:
+            The cached pygame.Surface sprite.
+        """
         return self.sprites.get((player, size, is_disabled))
 
 
@@ -180,6 +256,12 @@ class BoardRenderer:
     """Handles rendering of the 5x5 board, reserve trays, header, and animated victory beams."""
 
     def __init__(self, gui: Any):
+        """
+        Initializes the board renderer with references to GUI layout, glyph cache, and sprite cache.
+
+        Parameters:
+            gui: Reference to the parent GobbletGUI instance.
+        """
         self.gui = gui
         self.text_cache = TextSurfaceCache()
         self.sprite_cache = PieceSpriteCache(gui.piece_radii)
@@ -187,6 +269,19 @@ class BoardRenderer:
         self.overlay_surf = pygame.Surface((gui.width, gui.height), pygame.SRCALPHA)
 
     def draw_header(self):
+        """
+        Renders the top title banner, game configuration metadata, and real-time turn/status badge.
+
+        Draws:
+        1. Game title ("GOBBLET GOBBLERS") and subtitle displaying grid dimensions, winning streak target,
+           AI difficulty mode, and search depth.
+        2. A rounded status card containing a color-coded status badge pill:
+           - [VICTORY]: Displays victory reason and highlighted winning player banner.
+           - [AI THINKING]: Indicates Minimax branch search is actively running in background thread.
+           - [ALERT]: Highlights uncover traps or touch-move rule violations in red/blue.
+           - [HUMAN TURN]: Provides step-by-step guidance for piece selection and legal drop targets.
+           - [AI TURN]: Awaiting background decision dispatch.
+        """
         gui = self.gui
         screen = gui.screen
 
@@ -241,6 +336,16 @@ class BoardRenderer:
         screen.blit(m_surf, (pill_rect.right + 12, banner_rect.centery - m_surf.get_height() // 2))
 
     def draw_reserves(self):
+        """
+        Renders the side reserve trays for both Blue (Human, left) and Orange (AI, right) players.
+
+        Each tray displays:
+        1. Tray header indicating player ownership, color, and role.
+        2. Three piece reserve cards for Large (size 3), Medium (size 2), and Small (size 1) tiers.
+        3. Dynamic selection glow and animated pulsing halo (yellow-gold) when a piece is selected.
+        4. Smooth hover lerping, bevel highlight edges, and count counters (e.g., 'x 4' or '[EMPTY]').
+        5. 3D figurine sprites rendered via flyweight sprite cache, with disabled shading when depleted.
+        """
         gui = self.gui
         screen = gui.screen
         mouse_pos = pygame.mouse.get_pos()
@@ -334,6 +439,20 @@ class BoardRenderer:
             screen.blit(txt_surf, (rect.centerx - txt_surf.get_width() // 2, rect.bottom - 20))
 
     def draw_board(self):
+        """
+        Renders the 5x5 game board, grid groove inlays, cell bevels, piece stacks, and targeting reticles.
+
+        Rendering sequence:
+        1. Outer wooden board frame with rounded corners and horizontal plank accent lines.
+        2. Carved dark grid lines separating all 25 cell positions.
+        3. Cell tiles with dynamic lighting bevels reflecting state: normal, hovered, selected,
+           valid target (pulsing emerald green), or winning line cell (pulsing gold/crimson).
+        4. Victory celebratory light beam beneath pieces if a winning line exists.
+        5. Piece figurines inside each cell, rendered with selection halos for selected board pieces.
+        6. Winning piece diamond stars and golden auras for victorious alignments.
+        7. Interactive move target indicators: [GOBBLE] crosshair reticles over smaller enemy pieces,
+           or glowing green landing dots for empty destination cells.
+        """
         gui = self.gui
         screen = gui.screen
         mouse_pos = pygame.mouse.get_pos()
@@ -465,6 +584,15 @@ class BoardRenderer:
                     pygame.draw.circle(screen, (220, 255, 240), cell_rect.center, 3)
 
     def draw_winning_beam(self, winning_line: List[Tuple[int, int]]):
+        """
+        Renders a glowing celebratory laser beam and radiant golden halos connecting winning cells.
+
+        Drawn underneath the board pieces on a persistent zero-allocation alpha overlay surface,
+        creating a high-intensity radiant energy line across the winning row, column, or diagonal.
+
+        Parameters:
+            winning_line: List of (row, col) coordinates forming the victorious 5-in-a-row alignment.
+        """
         if not winning_line or len(winning_line) < 2:
             return
 
@@ -493,6 +621,15 @@ class BoardRenderer:
         gui.screen.blit(self.overlay_surf, (0, 0))
 
     def draw_winning_piece_auras(self, winning_line: List[Tuple[int, int]]):
+        """
+        Renders pulsing golden victory rings and sparkling diamond crown stars above winning pieces.
+
+        Overlaid above the piece figurines to accentuate the winning combination without obscuring
+        board readability. Features sinusoidal animation timing for continuous sparkle.
+
+        Parameters:
+            winning_line: List of (row, col) coordinates forming the victorious alignment.
+        """
         if not winning_line:
             return
 
@@ -525,10 +662,23 @@ class BoardRenderer:
         gui.screen.blit(self.overlay_surf, (0, 0))
 
     def draw_winning_celebration(self, winning_line: List[Tuple[int, int]]):
+        """
+        Composite victory renderer that executes both floor beam and top-layer piece aura animations.
+
+        Parameters:
+            winning_line: List of (row, col) coordinates constituting the winning line.
+        """
         self.draw_winning_beam(winning_line)
         self.draw_winning_piece_auras(winning_line)
 
     def draw_cell_stack(self, center: Tuple[int, int], stack: List[Piece]):
+        """
+        Renders the visible top piece of a board cell stack at the specified screen pixel center.
+
+        Parameters:
+            center: (x, y) pixel coordinates of the cell's center point.
+            stack: List of Piece instances stacked in the cell (bottom-to-top order).
+        """
         if not stack:
             return
         top_piece = stack[-1]
@@ -542,12 +692,30 @@ class BoardRenderer:
         is_top: bool = True,
         is_disabled: bool = False
     ):
-        """Ultra-fast flyweight blit using pre-rendered PieceSpriteCache."""
+        """
+        Draws a 3D Gobbler piece figurine using pre-rendered flyweight sprites from PieceSpriteCache.
+
+        Parameters:
+            center: (x, y) pixel center coordinates where the piece sprite will be blitted.
+            size: Size tier of the piece (1=Small, 2=Medium, 3=Large).
+            player: Owner of the piece (PLAYER_BLUE or PLAYER_ORANGE).
+            is_top: True if the piece is at the top of the stack (visible).
+            is_disabled: True if piece is in depleted reserve tray (rendered desaturated/dimmed).
+        """
         sprite = self.sprite_cache.get_sprite(player, size, is_disabled)
         if sprite:
             self.gui.screen.blit(sprite, (center[0] - sprite.get_width() // 2, center[1] - sprite.get_height() // 2))
 
     def draw_controls(self):
+        """
+        Renders interactive GUI control buttons with smooth hover animations and state indicators.
+
+        Draws:
+        1. [RESET] NEW GAME button: Resets the board and state to a fresh match.
+        2. [GOAL] 5-IN-A-ROW badge: Displays the current game victory streak condition.
+        3. [DIFFICULTY] button: Cycles through Easy, Medium, and Hard AI configurations,
+           styled with difficulty-specific accent colors (Green, Blue, Red).
+        """
         gui = self.gui
         screen = gui.screen
         mouse_pos = pygame.mouse.get_pos()

@@ -17,7 +17,7 @@ Scaled up from the standard 3x3 edition to a strategic 5x5 grid:
 - **Players**:
   - **Player 1 (Blue)**: Human
   - **Player 2 (Orange)**: AI Agent
-- **Win Condition**: The first player to form **5 in a row** (default) or **4 in a row** (toggleable) horizontally, vertically, or diagonally of visible topmost pieces wins immediately.
+- **Win Condition**: The first player to form **5 in a row** horizontally, vertically, or diagonally of visible topmost pieces wins immediately.
 - **Actions**:
   1. **Introduce from Reserve**: Place a piece from your reserve onto an empty cell or over any smaller piece (friendly gobbling allowed).
   2. **Move on Board**: Lift an exposed (topmost) piece of your color and move it to another cell (empty or over a smaller piece).
@@ -30,7 +30,7 @@ Scaled up from the standard 3x3 edition to a strategic 5x5 grid:
 ## 2. Artificial Intelligence Architecture
 
 ### A. Problem Formulation (PEAS)
-- **Performance Measure**: Win with minimum turns (+10,000), prevent defeat (-10,000), maximize 3-of-4 and 2-of-4 line potential, control center cells `(2,2)` and inner ring, preserve Large piece reserve advantage, and avoid uncover traps.
+- **Performance Measure**: Win with minimum turns (+10,000), prevent defeat (-10,000), maximize 4-of-5 and 3-of-5 line potential, control center cells `(2,2)` and inner ring, preserve Large piece reserve advantage, and avoid uncover traps.
 - **Environment**: 5x5 grid, dynamic visible board layer + hidden buried stack layers, deterministic transition model, imperfect information under bounded memory.
 - **Actuators**: Reserve drop actions `Drop(size, to_pos)` and reposition moves `Move(from_pos, to_pos)`.
 - **Sensors**: Visible board state, reserve inventories, turn counter, and a finite temporal memory window of recent moves.
@@ -83,6 +83,11 @@ python main.py
 python main.py --cli
 ```
 
+### Run Table 3 Empirical Benchmark (Pure Minimax vs Alpha-Beta Pruning)
+```bash
+python run_experiments.py
+```
+
 ### Run Automated Unit & GUI Test Suite
 ```bash
 python -m unittest discover -s tests
@@ -95,6 +100,5 @@ python -m unittest discover -s tests
 - **Click Board Piece**: Selects your visible piece to relocate. Valid targets highlight in green.
 - **Click Target Cell**: Places the selected piece.
 - **[RESET] New Game**: Resets the board and memory.
-- **[TARGET] Goal Toggle**: Toggles between 5-in-a-row (default) and 4-in-a-row win conditions.
-- **[SPEED] Speed Toggle**: Switches AI thinking speed between `Normal` (animated visualization), `Fast`, and `Instant`.
-- **[DEPTH] Depth Toggle**: Toggles AI search depth between `Depth 2` (speed) and `Depth 3` (mastery).
+- **[GOAL] 5-in-a-row**: Displays the fixed 5-in-a-row win condition.
+- **[DIFFICULTY] Difficulty Toggle**: Cycles AI difficulty between Easy (Depth 1, Memory 3), Medium (Depth 2, Memory 5), and Hard (Depth 3, Memory 8).

@@ -20,10 +20,35 @@ class TelemetryPanelRenderer:
     """Renders the AI Decision Telemetry and Cognitive Memory HUD panel."""
 
     def __init__(self, gui: Any):
+        """
+        Initializes the telemetry HUD renderer with parent GUI reference and text surface cache.
+
+        Parameters:
+            gui: Reference to the parent GobbletGUI instance holding game and telemetry state.
+        """
         self.gui = gui
         self.text_cache = TextSurfaceCache(max_entries=300)
 
     def draw_visualization_panel(self):
+        """
+        Renders the complete 4-section AI Decision Telemetry HUD panel on the right side of the screen.
+
+        Sections rendered:
+        1. Header & Live Telemetry:
+           - Status indicator pill ("THINKING..." with animated pulse or "IDLE (Awaiting Human)").
+           - Metrics card with search depth, visited node count, alpha-beta cutoffs, best minimax score,
+             elapsed search time, and temporal memory window size.
+        2. Search Tree Path Exploration:
+           - Hierarchical branch breadcrumb trail showing current recursive minimax evaluation path.
+           - Most recent alpha-beta pruning cutoff event details.
+        3. Candidate Moves & Minimax Scores:
+           - Top candidate moves evaluated by AI, displaying move notation, score, and state badges:
+             [CHOSEN] for the optimal selected move, [EVAL] for move currently under evaluation.
+        4. Cognitive Memory Belief State Table:
+           - Tracks hidden pieces under stacks across the bounded memory horizon (default 5 moves).
+           - Color-coded rows: Green [REMEMBERED] for pieces within the memory window;
+             Dark red [FORGOTTEN] for pieces that have slipped past the temporal horizon (bounded rationality).
+        """
         gui = self.gui
         screen = gui.screen
         x = gui.panel_rect.x + 16
