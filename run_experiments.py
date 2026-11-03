@@ -1,11 +1,12 @@
 """
 run_experiments.py - Automated Testing & Empirical Benchmarking Suite for Tabel 3.
 
-Runs all 4 test plans defined in Table 3:
+Runs the 3 computational test plans defined in Table 3:
 1. Aturan Game (Full Unit Test Suite: 49 tests)
 2. AI vs Pemain Acak (50 Matches against Random Baseline)
-3. Alpha-Beta Pruning Efficiency Benchmark (Nodes & Move Equivalence)
-4. AI vs Manusia (Latency & Difficulty Profile Analysis)
+3. Alpha-Beta Pruning Efficiency Benchmark (Nodes, Wall-Clock Time, & Move Equivalence)
+
+Note: Test 4 (AI vs Manusia) is an interactive user evaluation conducted in GUI via `python3 main.py`.
 """
 
 import sys
@@ -264,75 +265,27 @@ def test_3_alpha_beta_pruning() -> Dict[str, Any]:
     }
 
 
-def test_4_ai_vs_manusia() -> Dict[str, Any]:
-    print("\n" + "=" * 70)
-    print(" [PENGUJIAN 4] PROFIL RESPON AI VS MANUSIA (Latensi & Tingkat Kesulitan)")
-    print("=" * 70)
-    
-    # Benchmark latency per difficulty tier on 10 realistic boards
-    st = GameState(win_streak=5)
-    st.apply_move(Move(PLAYER_BLUE, 'drop', size=3, to_pos=(2, 2)))
-    st.apply_move(Move(PLAYER_ORANGE, 'drop', size=2, to_pos=(1, 1)))
-    st.apply_move(Move(PLAYER_BLUE, 'drop', size=1, to_pos=(2, 3)))
-    
-    profiles = [
-        ("Easy", 1, 3, "Pemula / Santai"),
-        ("Medium", 2, 5, "Taktis Menengah (Standar)"),
-        ("Hard", 3, 8, "Kompetitif / Master")
-    ]
-    
-    print(f"{'Tingkat Kesulitan':<18} | {'Depth':<6} | {'Memory':<6} | {'Avg Latensi':<12} | {'Evaluasi Rasa Bermain'}")
-    print("-" * 80)
-    
-    latencies = {}
-    for name, depth, mem, desc in profiles:
-        agent = MinimaxAgent(player=PLAYER_ORANGE, max_depth=depth, memory_window=mem)
-        agent.step_delay = 0.0
-        
-        # 5 runs to get accurate average
-        runs = []
-        for _ in range(5):
-            t0 = time.time()
-            agent.get_action(st.clone())
-            runs.append((time.time() - t0) * 1000.0)
-            
-        avg_lat = sum(runs) / len(runs)
-        latencies[name] = avg_lat
-        print(f"{name:<18} | d={depth:<4} | {mem:<6} | {avg_lat:>7.1f} ms    | {desc}")
-
-    passed = all(lat < 1000.0 for lat in latencies.values())
-    print("-" * 80)
-    print(f"Hasil: {'BERHASIL' if passed else 'GAGAL'}")
-    print("Catatan: Latensi < 300ms menjamin AI berpikir instan tanpa membuat manusia menunggu.")
-    print("Untuk mencoba interaktif langsung: Jalankan 'python3 main.py' dan klik tombol New Game/Difficulty.")
-    
-    return {
-        "passed": passed,
-        "latencies": latencies
-    }
-
-
 def main():
     print("=" * 70)
-    print(" GOBBLET GOBBLERS 5x5 - EKSEKUSI PENGUJIAN TABEL 3")
+    print(" GOBBLET GOBBLERS 5x5 - EKSEKUSI PENGUJIAN OTOMATIS (TABEL 3)")
     print(" Tim 6 AI - Universitas Ciputra")
     print("=" * 70)
     
     t1 = test_1_aturan_game()
     t2 = test_2_ai_vs_random(num_matches=50)
     t3 = test_3_alpha_beta_pruning()
-    t4 = test_4_ai_vs_manusia()
     
     print("\n" + "=" * 70)
-    print(" RANGKUMAN HASIL AKHIR PENGUJIAN TABEL 3")
+    print(" RANGKUMAN HASIL AKHIR PENGUJIAN OTOMATIS TABEL 3")
     print("=" * 70)
     win_str = f"{t2['win_rate']:.1f}%"
     red_str = f"{t3['overall_reduction']:.1f}%"
-    lat_str = f"{t4['latencies']['Medium']:.1f}ms"
     print(f" 1. Aturan Game       : {'BERHASIL (49/49 Unit Tests Lolos)' if t1['passed'] else 'GAGAL'}")
     print(f" 2. AI vs Pemain Acak : {'BERHASIL (Win Rate: ' + win_str + ', 0 Illegal)' if t2['passed'] else 'GAGAL'}")
     print(f" 3. Alpha-Beta Pruning: {'BERHASIL (' + red_str + ' Node Terpangkas, Langkah 100% Identik)' if t3['passed'] else 'GAGAL'}")
-    print(f" 4. AI vs Manusia     : {'BERHASIL (Respon Cepat ' + lat_str + ', 3 Tingkat Kesulitan)' if t4['passed'] else 'GAGAL'}")
+    print("=" * 70)
+    print(" Catatan: Pengujian 4 (AI vs Manusia) dilakukan secara kualitatif")
+    print(" oleh pemain manusia langsung melalui antarmuka GUI: 'python3 main.py'")
     print("=" * 70)
 
 
