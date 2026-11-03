@@ -12,7 +12,6 @@ Specifications:
 """
 
 from typing import List, Tuple, Optional, Dict, NamedTuple
-import copy
 
 PLAYER_BLUE = 1    # Human
 PLAYER_ORANGE = 2  # AI

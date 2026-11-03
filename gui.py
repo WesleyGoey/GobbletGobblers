@@ -244,12 +244,9 @@ class GobbletGUI:
             1: pygame.Rect(644, 480, 88, 136)
         }
 
-        # Unified Control Bar Buttons: [RESET] NEW GAME, [GOAL] 5-IN-A-ROW, [DIFFICULTY] LEVEL
+        # Unified Control Bar Buttons: [RESET] NEW GAME, [DIFFICULTY] LEVEL
         self.btn_new_game = pygame.Rect(140, 646, 152, 42)
         self.btn_difficulty = pygame.Rect(304, 646, 152, 42)
-
-        # Visualization Panel Bounds
-        self.panel_rect = pygame.Rect(750, 20, 550, 820)
 
         # Palette & Configuration Attributes
         self.piece_radii = PIECE_RADII

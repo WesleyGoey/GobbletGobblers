@@ -8,7 +8,7 @@ from game_engine import (
     generate_winning_lines, WINNING_LINES
 )
 from ai_agent import (
-    MinimaxAgent, MemoryInspector, build_belief_state, AIHeuristic
+    MinimaxAgent, build_belief_state, AIHeuristic
 )
 
 
@@ -190,9 +190,9 @@ class TestGobbletGameEngine(unittest.TestCase):
         Serves as the AI bounded memory integration test for buried piece forgetting.
 
         Validates that pieces covered more than `memory_window` turns ago are forgotten
-        by both `MemoryInspector` snapshots and `build_belief_state()`.
+        in `build_belief_state()`.
         Confirms that when turn advances to 8, a piece covered at turn 2 (delta = 6 > 5)
-        is flagged as forgotten and omitted from the AI's internal simulated board state.
+        is omitted from the AI's internal simulated board state.
         """
         # Blue places small piece at (2, 2) at turn 1
         m1 = Move(PLAYER_BLUE, 'drop', (2, 2), size=1)
@@ -202,17 +202,8 @@ class TestGobbletGameEngine(unittest.TestCase):
         m2 = Move(PLAYER_ORANGE, 'drop', (2, 2), size=2)
         self.state.apply_move(m2)
 
-        # Now simulate turns up to turn 8 (m2 was covered at turn 2, 8 - 2 = 6 turns ago > 5)
-        # Advance turns
+        # Now simulate turns up to turn 8 (covered at turn 2, 8 - 2 = 6 turns ago > 5)
         self.state.turn_number = 8
-
-        # Check memory inspector
-        snapshots = MemoryInspector.get_memory_snapshot(self.state, memory_window=5)
-        self.assertEqual(len(snapshots), 1)
-        record = snapshots[0]
-        self.assertEqual(record['pos'], (2, 2))
-        self.assertFalse(record['is_remembered'])
-        self.assertIn("Forgotten", record['status_text'])
 
         # Belief state should NOT have the buried piece
         belief = build_belief_state(self.state, memory_window=5)

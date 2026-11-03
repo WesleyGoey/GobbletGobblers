@@ -21,73 +21,9 @@ import time
 import math
 import threading
 from game_engine import (
-    GameState, Move, WINNING_LINES, WINNING_LINES_5,
-    CELL_LINES, CELL_LINES_5,
-    PLAYER_BLUE, PLAYER_ORANGE, SIZE_SYMBOLS, SIZE_NAMES, PLAYER_NAMES
+    GameState, Move, WINNING_LINES_5, CELL_LINES_5,
+    PLAYER_BLUE, PLAYER_ORANGE
 )
-
-
-class MemoryInspector:
-    """Tracks and reports what the AI remembers vs what it has forgotten."""
-
-    @staticmethod
-    def get_memory_snapshot(game_state: GameState, memory_window: int = 5) -> List[Dict[str, Any]]:
-        """
-        Inspects all board cells with buried pieces to evaluate cognitive memory retention.
-
-        Iterates over cells with stack depth > 1 and compares the turn each underlying piece
-        was covered against the current turn. Pieces covered within `memory_window` turns
-        are flagged as remembered, while older buried pieces are classified as forgotten.
-
-        Parameters:
-            game_state: The current GameState being evaluated.
-            memory_window: The temporal threshold (in turns) for retaining memory of hidden pieces.
-
-        Returns:
-            A list of status dictionaries containing position, stack depth, piece references,
-            temporal age, remembered boolean flag, and formatted display strings.
-        """
-        current_turn = game_state.turn_number
-        memory_records = []
-
-        for r in range(5):
-            for c in range(5):
-                stack = game_state.get_cell_stack(r, c)
-                if len(stack) > 1:
-                    top_piece = stack[-1]
-                    covered_turns = game_state.get_cell_covered_turns(r, c)
-                    for idx, buried_piece in enumerate(stack[:-1]):
-                        turn_covered = covered_turns[idx] if idx < len(covered_turns) else None
-                        turns_ago = (current_turn - turn_covered) if turn_covered is not None else 999
-                        is_remembered = (turns_ago <= memory_window)
-
-                        p_col = "Blue" if buried_piece.player == PLAYER_BLUE else "Orange"
-                        s_name = SIZE_NAMES.get(buried_piece.size, str(buried_piece.size)).split()[0]
-                        rem_label = f"{s_name} {p_col}"
-
-                        status_text = (
-                            f"{rem_label} (remembered, {turns_ago}t ago)"
-                            if is_remembered else
-                            f"UNKNOWN (Forgotten >{memory_window}t)"
-                        )
-
-                        memory_records.append({
-                            'pos': (r, c),
-                            'depth': idx,
-                            'top_piece': top_piece,
-                            'buried_piece': buried_piece,
-                            'turn_covered': turn_covered,
-                            'turns_ago': turns_ago,
-                            'is_remembered': is_remembered,
-                            'status_text': status_text,
-                            'display_str': (
-                                f"Cell ({r},{c}) buried: {rem_label} (remembered)"
-                                if is_remembered else
-                                f"Cell ({r},{c}) buried piece: UNKNOWN (forgotten)"
-                            )
-                        })
-
-        return memory_records
 
 
 def build_belief_state(real_state: GameState, memory_window: int = 5) -> GameState:

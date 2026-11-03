@@ -14,7 +14,7 @@ from game_engine import (
     generate_winning_lines, WINNING_LINES
 )
 from ai_agent import (
-    MinimaxAgent, MemoryInspector, build_belief_state, AIHeuristic
+    MinimaxAgent, build_belief_state, AIHeuristic
 )
 
 
@@ -130,11 +130,11 @@ class TestGobbletEdgeCases(unittest.TestCase):
         """
         Serves as the precise boundary test for bounded memory window transitions.
 
-        Validates the cognitive forgetting model implemented in `MemoryInspector`:
+        Validates the cognitive forgetting model implemented in `build_belief_state`:
         - A piece buried within the memory window (`current_turn - covered_turn <= 5`)
-          must be accurately recalled (`is_remembered == True`).
+          must be accurately recalled and kept in the belief stack.
         - When turn advances beyond the memory window (`current_turn - covered_turn == 6`),
-          the piece must transition to forgotten (`is_remembered == False`).
+          the piece is forgotten and omitted from the belief stack.
         """
         # Blue drops small at (3, 3) at turn 1
         self.state.apply_move(Move(PLAYER_BLUE, 'drop', (3, 3), size=1))
@@ -143,13 +143,15 @@ class TestGobbletEdgeCases(unittest.TestCase):
 
         # At turn 7: current_turn = 7, covered at 2 => 7 - 2 = 5 turns ago (Remembered!)
         self.state.turn_number = 7
-        snap7 = MemoryInspector.get_memory_snapshot(self.state, memory_window=5)
-        self.assertTrue(snap7[0]['is_remembered'])
+        belief7 = build_belief_state(self.state, memory_window=5)
+        self.assertEqual(len(belief7.board[3][3]), 2)
+        self.assertEqual(belief7.board[3][3][0].player, PLAYER_BLUE)
 
         # At turn 8: current_turn = 8, covered at 2 => 8 - 2 = 6 turns ago (Forgotten!)
         self.state.turn_number = 8
-        snap8 = MemoryInspector.get_memory_snapshot(self.state, memory_window=5)
-        self.assertFalse(snap8[0]['is_remembered'])
+        belief8 = build_belief_state(self.state, memory_window=5)
+        self.assertEqual(len(belief8.board[3][3]), 1)
+        self.assertEqual(belief8.board[3][3][0].player, PLAYER_ORANGE)
 
     def test_alpha_beta_pruning_execution(self):
         """
