@@ -961,4 +961,3 @@ class GobbletGUI:
         ('Difficulty', 'New Game / Reset', 'Goal') with smooth hover animations and active status texts.
         """
         self.renderer.draw_controls()
-
