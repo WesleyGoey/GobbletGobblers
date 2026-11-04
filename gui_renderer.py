@@ -45,6 +45,16 @@ def lerp_color(c1: Tuple[int, int, int], c2: Tuple[int, int, int], t: float) -> 
         int(c1[2] + (c2[2] - c1[2]) * t),
     )
 
+def truncate_text(font: pygame.font.Font, text: str, max_px: int) -> str:
+    """Truncates a string with an ellipsis if it exceeds the pixel budget."""
+    if font.size(text)[0] <= max_px:
+        return text
+    ellipsis = "…"
+    while text and font.size(text + ellipsis)[0] > max_px:
+        text = text[:-1]
+    return text + ellipsis if text else ""
+
+
 
 class TextSurfaceCache:
     """Caches rendered font glyph surfaces to prevent redundant FreeType rasterization."""
@@ -270,88 +280,104 @@ class BoardRenderer:
 
     def draw_header(self):
         """
-        Renders the top title banner, game configuration metadata, and real-time turn/status badge.
-
-        Draws:
-        1. Game title ("GOBBLET GOBBLERS") and subtitle displaying grid dimensions, winning streak target,
-           AI difficulty mode, and search depth.
-        2. A rounded status card containing a color-coded status badge pill:
-           - [VICTORY]: Displays victory reason and highlighted winning player banner.
-           - [AI THINKING]: Indicates Minimax branch search is actively running in background thread.
-           - [ALERT]: Highlights uncover traps or touch-move rule violations in red/blue.
-           - [HUMAN TURN]: Provides step-by-step guidance for piece selection and legal drop targets.
-           - [AI TURN]: Awaiting background decision dispatch.
+        Renders centered title on its own row, and below it the turn badge
+        and countdown timer on the same row with clean wooden plaque aesthetics.
         """
         gui = self.gui
         screen = gui.screen
+        board_rect = gui.board_rect
 
-        title_surf = self.text_cache.render(gui.font_title, "GOBBLET GOBBLERS", gui.COLOR_TEXT_WHITE)
-        screen.blit(title_surf, (140, 25))
+        # 1. Title on its own row (Centered)
+        title_surf = self.text_cache.render(gui.font_title, "Gobblet Gobblers", (252, 248, 242))
+        title_x = board_rect.centerx - title_surf.get_width() // 2
+        title_y = 36
+        screen.blit(title_surf, (title_x, title_y))
 
-        # Render 5-minute session countdown clock on the right side of the header
+        # Status badge determination: simplified to only turn/outcome
+        if gui.state.game_over:
+            if gui.state.winner is None:
+                badge_text = "Draw"
+                badge_col = (255, 255, 255)
+                badge_bg = (105, 75, 42)
+            else:
+                if gui.state.winner == PLAYER_BLUE:
+                    badge_text = "Victory!"
+                    badge_col = (255, 255, 255)
+                    badge_bg = (32, 138, 72)
+                else:
+                    badge_text = "AI Wins"
+                    badge_col = (255, 255, 255)
+                    badge_bg = (185, 65, 22)
+        elif gui.ai_thinking:
+            badge_text = "AI Turn"
+            badge_col = (255, 255, 255)
+            badge_bg = (205, 95, 22)
+        elif gui.state.current_player == PLAYER_BLUE:
+            if "Uncover Trap" in gui.status_message:
+                badge_text = "Uncover Trap"
+                badge_col = (255, 255, 255)
+                badge_bg = (185, 42, 38)
+            elif "Touch-Move" in gui.status_message:
+                badge_text = "Touch-Move"
+                badge_col = (255, 255, 255)
+                badge_bg = (195, 75, 28)
+            else:
+                badge_text = "Your Turn"
+                badge_col = (255, 255, 255)
+                badge_bg = (26, 92, 172)
+        else:
+            badge_text = "AI Turn"
+            badge_col = (255, 255, 255)
+            badge_bg = (205, 95, 22)
+
+        # Calculate wooden bar dimensions with comfortable margin on left/right
+        gap = 15
+        b_surf = self.text_cache.render(gui.font_bold, badge_text, badge_col)
+        tab_w = b_surf.get_width() + 24
+        clock_w = 118
+
+        total_content_w = tab_w + gap + clock_w
+        padding_x = max(18, int(total_content_w * 0.03))  # ~15% extra extension beyond content on each side
+
+        banner_w = total_content_w + padding_x * 2
+        banner_x = board_rect.centerx - banner_w // 2
+        banner_rect = pygame.Rect(banner_x, 86, banner_w, 38)
+
+        # Draw wooden backing bar (snug fit)
+        pygame.draw.rect(screen, (38, 27, 20), banner_rect, border_radius=6)
+        pygame.draw.line(screen, (68, 48, 34), (banner_rect.left + 4, banner_rect.top + 1), (banner_rect.right - 4, banner_rect.top + 1), 1)
+        pygame.draw.line(screen, (20, 14, 10), (banner_rect.left + 4, banner_rect.bottom - 1), (banner_rect.right - 4, banner_rect.bottom - 1), 1)
+
+        # Render Turn Badge
+        tab_rect = pygame.Rect(banner_rect.x + padding_x, banner_rect.y + 4, tab_w, banner_rect.height - 8)
+        pygame.draw.rect(screen, badge_bg, tab_rect, border_radius=5)
+        hi_line = lerp_color(badge_bg, (255, 255, 255), 0.25)
+        pygame.draw.line(screen, hi_line, (tab_rect.left + 2, tab_rect.top + 1), (tab_rect.right - 2, tab_rect.top + 1), 1)
+        screen.blit(b_surf, (tab_rect.centerx - b_surf.get_width() // 2,
+                             tab_rect.centery - b_surf.get_height() // 2))
+
+        # Render Timer on Right (same row, next to turn badge)
         rem_sec = int(gui.get_remaining_session_time()) if hasattr(gui, "get_remaining_session_time") else 300
         mins = rem_sec // 60
         secs = rem_sec % 60
         time_text = f"{mins:02d}:{secs:02d}"
-        time_col = gui.COLOR_RED_ACCENT if rem_sec <= 30 else (gui.COLOR_TEXT_HIGHLIGHT if rem_sec <= 60 else (180, 200, 220))
-
-        clock_rect = pygame.Rect(520, 26, 100, 32)
-        pygame.draw.rect(screen, (24, 30, 42), clock_rect, border_radius=6)
-        pygame.draw.rect(screen, (42, 54, 76), clock_rect, 1, border_radius=6)
-        clock_surf = self.text_cache.render(gui.font_bold, time_text, time_col)
-        screen.blit(clock_surf, (clock_rect.centerx - clock_surf.get_width() // 2,
-                                 clock_rect.centery - clock_surf.get_height() // 2))
-
-        subtitle = self.text_cache.render(
-            gui.font_small,
-            f"5x5 Grid | Win: {gui.win_streak}-in-a-row | AI: {gui.difficulty.upper()} (Depth {gui.ai_depth})",
-            gui.COLOR_TEXT_MUTED
-        )
-        screen.blit(subtitle, (140, 58))
-
-        # Turn & Status Banner
-        banner_rect = pygame.Rect(140, 85, 480, 46)
-        pygame.draw.rect(screen, gui.COLOR_CARD_BG, banner_rect, border_radius=8)
-        pygame.draw.rect(screen, gui.COLOR_BORDER, banner_rect, 1, border_radius=8)
-
-        if gui.state.game_over:
-            if gui.state.winner is None:
-                badge_text = "[DRAW]"
-                badge_col = gui.COLOR_TEXT_HIGHLIGHT
-            else:
-                badge_text = "[VICTORY]"
-                badge_col = gui.COLOR_TEXT_HIGHLIGHT if gui.state.winner == PLAYER_BLUE else gui.COLOR_ORANGE_LIGHT
-            msg_text = gui.state.win_reason
-        elif gui.ai_thinking:
-            badge_text = "[AI THINKING]"
-            badge_col = gui.COLOR_ORANGE_LIGHT
-            msg_text = "Exploring Minimax search tree..."
-        elif gui.status_message:
-            badge_text = "[ALERT]" if "[UNCOVER TRAP]" in gui.status_message else "[TOUCH-MOVE]"
-            badge_col = gui.COLOR_RED_ACCENT if "[UNCOVER TRAP]" in gui.status_message else gui.COLOR_BLUE_LIGHT
-            msg_text = gui.status_message.strip()
-        elif gui.state.current_player == PLAYER_BLUE:
-            badge_text = "[HUMAN TURN]"
-            badge_col = gui.COLOR_BLUE_LIGHT
-            if gui.selected_reserve_size:
-                msg_text = f"Drop {SIZE_NAMES[gui.selected_reserve_size]} on highlighted green cell"
-            elif gui.selected_board_pos:
-                msg_text = f"Move piece from {gui.selected_board_pos} to target cell"
-            else:
-                msg_text = "Click a reserve tray piece or a board piece"
+        if rem_sec <= 30:
+            time_col = (245, 85, 70)
+        elif rem_sec <= 60:
+            time_col = (245, 195, 45)
         else:
-            badge_text = "[AI TURN]"
-            badge_col = gui.COLOR_ORANGE_LIGHT
-            msg_text = "Awaiting decision..."
+            time_col = (250, 245, 238)
 
-        b_surf = self.text_cache.render(gui.font_bold, badge_text, badge_col)
-        pill_rect = pygame.Rect(banner_rect.x + 10, banner_rect.y + 10, b_surf.get_width() + 14, 26)
-        pygame.draw.rect(screen, (28, 34, 46), pill_rect, border_radius=6)
-        pygame.draw.rect(screen, badge_col, pill_rect, 1, border_radius=6)
-        screen.blit(b_surf, (pill_rect.centerx - b_surf.get_width() // 2, pill_rect.centery - b_surf.get_height() // 2))
+        clock_rect = pygame.Rect(tab_rect.right + gap, banner_rect.y + 4, clock_w, banner_rect.height - 8)
+        pygame.draw.rect(screen, (22, 16, 12), clock_rect, border_radius=5)
+        pygame.draw.line(screen, (14, 10, 8), (clock_rect.left + 2, clock_rect.top + 1), (clock_rect.right - 2, clock_rect.top + 1), 1)
+        pygame.draw.line(screen, (46, 34, 24), (clock_rect.left + 2, clock_rect.bottom - 1), (clock_rect.right - 2, clock_rect.bottom - 1), 1)
 
-        m_surf = self.text_cache.render(gui.font_regular, msg_text, gui.COLOR_TEXT_WHITE)
-        screen.blit(m_surf, (pill_rect.right + 12, banner_rect.centery - m_surf.get_height() // 2))
+        time_lbl = self.text_cache.render(gui.font_small, "TIME", (150, 135, 122))
+        screen.blit(time_lbl, (clock_rect.x + 10, clock_rect.centery - time_lbl.get_height() // 2))
+
+        clock_surf = self.text_cache.render(gui.font_mono, time_text, time_col)
+        screen.blit(clock_surf, (clock_rect.right - clock_surf.get_width() - 10, clock_rect.centery - clock_surf.get_height() // 2))
 
     def draw_reserves(self):
         """
@@ -726,46 +752,202 @@ class BoardRenderer:
 
     def draw_controls(self):
         """
-        Renders interactive GUI control buttons with smooth hover animations and state indicators.
-
-        Draws:
-        1. [RESET] NEW GAME button: Resets the board and state to a fresh match.
-        2. [GOAL] 5-IN-A-ROW badge: Displays the current game victory streak condition.
-        3. [DIFFICULTY] button: Cycles through Easy, Medium, and Hard AI configurations,
-           styled with difficulty-specific accent colors (Green, Blue, Red).
+        Renders tactile game buttons with clear functional hierarchy and zero AI wireframe tells:
+        1. [Primary] New Game - Rich teak/amber action CTA
+        2. [Setting] AI: Easy / Medium / Hard - Mode selector with active status pip
+        3. [Guide] How to Play - Subtle secondary manual launcher
         """
         gui = self.gui
         screen = gui.screen
         mouse_pos = pygame.mouse.get_pos()
+        help_open = getattr(gui, "show_help_modal", False)
 
-        # 1. New Game Button
-        hov1 = gui.btn_new_game.collidepoint(mouse_pos)
-        hov1_val = gui.get_hover("btn_new_game", hov1)
-        bg1 = lerp_color((30, 36, 48), (50, 62, 82), hov1_val)
-        border1 = lerp_color(gui.COLOR_BORDER, (110, 150, 210), hov1_val)
-        pygame.draw.rect(screen, bg1, gui.btn_new_game, border_radius=8)
-        pygame.draw.rect(screen, border1, gui.btn_new_game, 1, border_radius=8)
-        top_line1 = lerp_color((42, 50, 66), (75, 92, 120), hov1_val)
-        pygame.draw.line(screen, top_line1,
-                         (gui.btn_new_game.left + 4, gui.btn_new_game.top + 2),
-                         (gui.btn_new_game.right - 4, gui.btn_new_game.top + 2), 1)
-        lbl1 = self.text_cache.render(gui.font_btn, "[RESET] NEW GAME", gui.COLOR_TEXT_WHITE)
-        screen.blit(lbl1, (gui.btn_new_game.centerx - lbl1.get_width() // 2, gui.btn_new_game.centery - lbl1.get_height() // 2))
+        buttons = [
+            (gui.btn_new_game, "New Game", None, "primary"),
+            (gui.btn_difficulty, gui.DIFFICULTY_CONFIGS[gui.difficulty]["label"],
+             gui.DIFFICULTY_CONFIGS[gui.difficulty]["color"], "selector"),
+            (gui.btn_help, "How to Play", None, "secondary"),
+        ]
 
-        # 2. Difficulty Button
-        hov_diff = gui.btn_difficulty.collidepoint(mouse_pos)
-        hov_diff_val = gui.get_hover("btn_difficulty", hov_diff)
-        diff_cfg = gui.DIFFICULTY_CONFIGS[gui.difficulty]
-        diff_accent = diff_cfg["color"]
-        bg_diff = lerp_color(diff_cfg["bg"], diff_cfg["hover_bg"], hov_diff_val)
-        border_diff = lerp_color(diff_cfg["border"], diff_accent, hov_diff_val)
-        top_line_diff = lerp_color(diff_cfg["top_line"], diff_cfg["hover_top"], hov_diff_val)
+        for rect, label, pip_color, role in buttons:
+            is_hovered = rect.collidepoint(mouse_pos) and not help_open
+            hov_val = gui.get_hover(f"btn_{label[:6]}", is_hovered)
 
-        pygame.draw.rect(screen, bg_diff, gui.btn_difficulty, border_radius=8)
-        pygame.draw.rect(screen, border_diff, gui.btn_difficulty, 1, border_radius=8)
-        pygame.draw.line(screen, top_line_diff,
-                         (gui.btn_difficulty.left + 4, gui.btn_difficulty.top + 2),
-                         (gui.btn_difficulty.right - 4, gui.btn_difficulty.top + 2), 1)
-        lbl_diff = self.text_cache.render(gui.font_btn, diff_cfg["label"], diff_accent)
-        screen.blit(lbl_diff, (gui.btn_difficulty.centerx - lbl_diff.get_width() // 2,
-                               gui.btn_difficulty.centery - lbl_diff.get_height() // 2))
+            if role == "primary":
+                # Primary CTA: Warm mahogany/amber with rich bevels
+                bg_col = lerp_color((92, 54, 30), (122, 74, 42), hov_val)
+                top_highlight = lerp_color((146, 88, 48), (178, 110, 64), hov_val)
+                bottom_shadow = lerp_color((52, 28, 16), (68, 38, 22), hov_val)
+                text_col = (255, 255, 255)
+            elif role == "selector":
+                # Mode selector: Deep walnut finish with live difficulty pip
+                bg_col = lerp_color((44, 32, 24), (62, 46, 34), hov_val)
+                top_highlight = lerp_color((74, 54, 40), (98, 72, 52), hov_val)
+                bottom_shadow = lerp_color((24, 16, 12), (32, 22, 16), hov_val)
+                text_col = (248, 242, 235)
+            else:
+                # Secondary guide: Subtle refined dark wood
+                bg_col = lerp_color((40, 28, 22), (56, 40, 30), hov_val)
+                top_highlight = lerp_color((66, 48, 36), (88, 64, 48), hov_val)
+                bottom_shadow = lerp_color((22, 14, 10), (28, 18, 14), hov_val)
+                text_col = lerp_color((215, 205, 195), (255, 255, 255), hov_val)
+
+            # Solid tactile button body (no thin 1px wireframe outline)
+            pygame.draw.rect(screen, bg_col, rect, border_radius=6)
+
+            # Tactile bevel chamfer lines
+            pygame.draw.line(screen, top_highlight, (rect.left + 4, rect.top + 1), (rect.right - 4, rect.top + 1), 1)
+            pygame.draw.line(screen, bottom_shadow, (rect.left + 4, rect.bottom - 2), (rect.right - 4, rect.bottom - 2), 1)
+
+            # Button content
+            if pip_color:
+                # Mode selector pip
+                pip_r = 4.0
+                pip_x = rect.x + 22
+                pip_y = rect.centery
+                # Pip soft glow
+                pygame.draw.circle(screen, lerp_color(bg_col, pip_color, 0.4), (int(pip_x), int(pip_y)), int(pip_r + 2))
+                pygame.draw.circle(screen, pip_color, (int(pip_x), int(pip_y)), int(pip_r))
+
+                lbl_surf = self.text_cache.render(gui.font_btn, label, text_col)
+                screen.blit(lbl_surf, (rect.x + 36, rect.centery - lbl_surf.get_height() // 2))
+            else:
+                lbl_surf = self.text_cache.render(gui.font_btn, label, text_col)
+                screen.blit(lbl_surf, (rect.centerx - lbl_surf.get_width() // 2,
+                                       rect.centery - lbl_surf.get_height() // 2))
+
+    def draw_help_modal(self):
+        """
+        Renders the interactive 'How to Play' guide modal:
+        - Warm espresso translucent scrim
+        - Centered 640x510 handcrafted game manual with wooden frame
+        - 2x2 visual rule cards with mini diagrams and concise copy
+        - Bounded-Memory AI twist callout strip
+        - 'Let's Play!' primary button
+        """
+        gui = self.gui
+        screen = gui.screen
+        modal_rect = gui.help_modal_rect
+        mouse_pos = pygame.mouse.get_pos()
+
+        # 1. Full-window translucent scrim
+        self.overlay_surf.fill((0, 0, 0, 0))
+        pygame.draw.rect(self.overlay_surf, (14, 10, 8, 220), (0, 0, gui.width, gui.height))
+        screen.blit(self.overlay_surf, (0, 0))
+
+        # 2. Main Modal Card (warm handcrafted game manual)
+        pygame.draw.rect(screen, (42, 30, 22), modal_rect, border_radius=14)
+        pygame.draw.rect(screen, (142, 102, 64), modal_rect, 2, border_radius=14)
+
+        # Card top highlight
+        pygame.draw.line(screen, (95, 70, 48), (modal_rect.left + 14, modal_rect.top + 2),
+                         (modal_rect.right - 14, modal_rect.top + 2), 1)
+
+        # 3. Modal Header: Title + Subtitle + Close '×' Button
+        title_surf = gui.font_header.render("How to Play", True, gui.COLOR_TEXT_WHITE)
+        screen.blit(title_surf, (modal_rect.x + 28, modal_rect.y + 24))
+
+        sub_surf = gui.font_small.render("Gobblet Gobblers · 5×5 Tabletop Rules & AI Memory Twist", True, (215, 195, 175))
+        screen.blit(sub_surf, (modal_rect.x + 28, modal_rect.y + 54))
+
+        # Close '×' button
+        x_rect = gui.btn_help_x
+        x_hover = x_rect.collidepoint(mouse_pos)
+        x_bg = (68, 48, 34) if x_hover else (54, 38, 28)
+        pygame.draw.rect(screen, x_bg, x_rect, border_radius=6)
+        pygame.draw.rect(screen, (110, 80, 54), x_rect, 1, border_radius=6)
+        x_txt = gui.font_bold.render("×", True, (250, 245, 238) if x_hover else (205, 185, 168))
+        screen.blit(x_txt, (x_rect.centerx - x_txt.get_width() // 2, x_rect.centery - x_txt.get_height() // 2 - 1))
+
+        # 4. 2x2 Rule Grid Cards
+        rules = [
+            ("1. Win with 5-in-a-Row",
+             "Line up 5 pieces in a row",
+             "(horizontally, vertically, or diagonally).",
+             "line"),
+            ("2. Two Options per Turn",
+             "Drop a piece from your side tray, or move",
+             "one of your visible pieces on the board.",
+             "move"),
+            ("3. Gobble Smaller Pieces",
+             "Larger pieces cover smaller pieces (L > M > S),",
+             "hiding them underneath on the board.",
+             "gobble"),
+            ("4. Touch-Move & Trap",
+             "Touch a board piece and you must move it!",
+             "Revealing an AI win loses unless blocked.",
+             "trap"),
+        ]
+
+        card_w = (modal_rect.width - 56 - 16) // 2
+        card_h = 104
+
+        for i, (rtitle, line1, line2, icon_type) in enumerate(rules):
+            col = i % 2
+            row = i // 2
+            cx = modal_rect.x + 28 + col * (card_w + 16)
+            cy = modal_rect.y + 84 + row * (card_h + 12)
+            c_rect = pygame.Rect(cx, cy, card_w, card_h)
+
+            pygame.draw.rect(screen, (52, 38, 28), c_rect, border_radius=8)
+            pygame.draw.rect(screen, (98, 72, 48), c_rect, 1, border_radius=8)
+
+            # Mini Visual Icon
+            self._draw_rule_icon(screen, c_rect.x + 14, c_rect.y + 14, icon_type)
+
+            # Title
+            t_surf = gui.font_bold.render(rtitle, True, gui.COLOR_TEXT_WHITE)
+            screen.blit(t_surf, (c_rect.x + 44, c_rect.y + 12))
+
+            # Body copy
+            l1_surf = gui.font_small.render(line1, True, (235, 225, 215))
+            l2_surf = gui.font_small.render(line2, True, (195, 185, 175))
+            screen.blit(l1_surf, (c_rect.x + 14, c_rect.y + 46))
+            screen.blit(l2_surf, (c_rect.x + 14, c_rect.y + 68))
+
+        # 5. Bottom Callout Strip: Bounded-Memory AI Twist
+        callout_y = modal_rect.y + 324
+        callout_h = 108
+        callout_rect = pygame.Rect(modal_rect.x + 28, callout_y, modal_rect.width - 56, callout_h)
+        pygame.draw.rect(screen, (56, 40, 28), callout_rect, border_radius=8)
+        pygame.draw.rect(screen, (165, 118, 62), callout_rect, 1, border_radius=8)
+
+        # Callout Title
+        ct_surf = gui.font_bold.render("Bounded-Memory AI Twist", True, (245, 196, 75))
+        screen.blit(ct_surf, (callout_rect.x + 16, callout_rect.y + 12))
+
+        # Callout Body Copy
+        cb1 = "The AI agent only remembers buried pieces for a few turns (Easy: 3 · Medium: 5 · Hard: 8)."
+        cb2 = "Outlast its cognitive memory horizon to spring hidden uncover traps and seize the match!"
+        cb1_surf = gui.font_small.render(cb1, True, (240, 230, 220))
+        cb2_surf = gui.font_small.render(cb2, True, (205, 195, 185))
+        screen.blit(cb1_surf, (callout_rect.x + 16, callout_rect.y + 36))
+        screen.blit(cb2_surf, (callout_rect.x + 16, callout_rect.y + 56))
+
+        # 6. 'Let's Play!' Primary Button
+        btn_close = gui.btn_help_close
+        close_hov = btn_close.collidepoint(mouse_pos)
+        close_bg = (225, 155, 55) if close_hov else (195, 130, 44)
+        pygame.draw.rect(screen, close_bg, btn_close, border_radius=8)
+        pygame.draw.rect(screen, (245, 196, 75), btn_close, 1, border_radius=8)
+        c_lbl = gui.font_bold.render("Let's Play!", True, (255, 255, 255))
+        screen.blit(c_lbl, (btn_close.centerx - c_lbl.get_width() // 2,
+                            btn_close.centery - c_lbl.get_height() // 2))
+
+    def _draw_rule_icon(self, screen: pygame.Surface, x: int, y: int, icon_type: str):
+        """Draws miniature visual diagrams for rule modal cards."""
+        if icon_type == "line":
+            for d in range(5):
+                pygame.draw.circle(screen, (245, 196, 75), (x + d * 5 + 3, y + 8), 2)
+        elif icon_type == "move":
+            pygame.draw.line(screen, (115, 215, 140), (x + 2, y + 8), (x + 18, y + 8), 2)
+            pygame.draw.line(screen, (115, 215, 140), (x + 14, y + 4), (x + 18, y + 8), 2)
+            pygame.draw.line(screen, (115, 215, 140), (x + 14, y + 12), (x + 18, y + 8), 2)
+        elif icon_type == "gobble":
+            pygame.draw.circle(screen, (245, 125, 35), (x + 11, y + 8), 8, 1)
+            pygame.draw.circle(screen, (45, 140, 235), (x + 11, y + 8), 5, 1)
+            pygame.draw.circle(screen, (245, 196, 75), (x + 11, y + 8), 2)
+        elif icon_type == "trap":
+            pts = [(x + 11, y + 2), (x + 19, y + 8), (x + 11, y + 14), (x + 3, y + 8)]
+            pygame.draw.polygon(screen, (235, 100, 80), pts, 1)
+            pygame.draw.circle(screen, (235, 100, 80), (x + 11, y + 8), 2)

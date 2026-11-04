@@ -75,7 +75,7 @@ DIFFICULTY_CONFIGS = {
         "search_budget_ratio": 0.7,
         "time_limit": 0.1,
         "evaluation_noise": 120.0,
-        "label": "[DIFFICULTY] EASY",
+        "label": "AI: Easy",
         "color": COLOR_GREEN_ACCENT,
         "bg": (20, 36, 28),
         "hover_bg": (32, 60, 46),
@@ -86,7 +86,7 @@ DIFFICULTY_CONFIGS = {
     "medium": {
         "depth": 2,
         "memory_window": 5,
-        "label": "[DIFFICULTY] MEDIUM",
+        "label": "AI: Medium",
         "color": COLOR_TEXT_HIGHLIGHT,
         "bg": (38, 34, 22),
         "hover_bg": (60, 52, 32),
@@ -97,7 +97,7 @@ DIFFICULTY_CONFIGS = {
     "hard": {
         "depth": 3,
         "memory_window": 8,
-        "label": "[DIFFICULTY] HARD",
+        "label": "AI: Hard",
         "color": COLOR_CORAL_ACCENT,
         "bg": (42, 24, 26),
         "hover_bg": (66, 36, 40),
@@ -138,7 +138,7 @@ def lerp_color(c1: Tuple[int, int, int], c2: Tuple[int, int, int], t: float) -> 
 
 
 class GobbletGUI:
-    def __init__(self, width: int = 760, height: int = 760, win_streak: int = 5, difficulty: str = "medium"):
+    def __init__(self, width: int = 760, height: int = 760, win_streak: int = 5, difficulty: str = "medium", show_guide_on_start: bool = True):
         """
         Initializes the Gobblet Gobblers Pygame desktop GUI application.
 
@@ -178,13 +178,13 @@ class GobbletGUI:
         self.hover_anim: Dict[str, float] = {}
 
         # Fonts
-        self.font_title = pygame.font.SysFont("Helvetica, Arial", 24, bold=True)
+        self.font_title = pygame.font.SysFont("Helvetica, Arial", 40, bold=True)
         self.font_header = pygame.font.SysFont("Helvetica, Arial", 18, bold=True)
         self.font_bold = pygame.font.SysFont("Helvetica, Arial", 14, bold=True)
         self.font_btn = pygame.font.SysFont("Helvetica, Arial", 12, bold=True)
         self.font_regular = pygame.font.SysFont("Helvetica, Arial", 13)
         self.font_small = pygame.font.SysFont("Helvetica, Arial", 11)
-        self.font_mono = pygame.font.SysFont("Courier, Consolas, Menlo", 12)
+        self.font_mono = pygame.font.SysFont("Courier, Consolas, Menlo", 16, bold=True)
 
         # Game State (Fixed to 5-in-a-row)
         self.win_streak: int = 5
@@ -244,9 +244,24 @@ class GobbletGUI:
             1: pygame.Rect(644, 480, 88, 136)
         }
 
-        # Unified Control Bar Buttons: [RESET] NEW GAME, [DIFFICULTY] LEVEL
-        self.btn_new_game = pygame.Rect(140, 646, 152, 42)
-        self.btn_difficulty = pygame.Rect(304, 646, 152, 42)
+        # Unified Control Bar Buttons: [New Game], [Difficulty], [How to Play]
+        btn_w = 152
+        gap = 12
+        bx = self.board_rect.x
+        by = self.board_rect.bottom + 16
+        self.btn_new_game = pygame.Rect(bx, by, btn_w, 42)
+        self.btn_difficulty = pygame.Rect(bx + btn_w + gap, by, btn_w, 42)
+        self.btn_help = pygame.Rect(bx + (btn_w + gap) * 2, by, btn_w, 42)
+
+        # How to Play Guide Modal State & Geometry
+        self.show_help_modal: bool = show_guide_on_start
+        modal_w = 640
+        modal_h = 510
+        mx = (self.width - modal_w) // 2
+        my = max(10, (self.height - modal_h) // 2)
+        self.help_modal_rect = pygame.Rect(mx, my, modal_w, modal_h)
+        self.btn_help_close = pygame.Rect(self.help_modal_rect.right - 140, self.help_modal_rect.bottom - 48, 112, 34)
+        self.btn_help_x = pygame.Rect(self.help_modal_rect.right - 44, self.help_modal_rect.top + 16, 28, 28)
 
         # Palette & Configuration Attributes
         self.piece_radii = PIECE_RADII
@@ -392,6 +407,13 @@ class GobbletGUI:
                 self.running = False
                 return
 
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_h:
+                    self.show_help_modal = not self.show_help_modal
+                elif event.key == pygame.K_ESCAPE and self.show_help_modal:
+                    self.show_help_modal = False
+                elif event.key == pygame.K_r:
+                    self.reset_game()
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 mouse_pos = event.pos
                 self.handle_mouse_click(mouse_pos)
@@ -407,6 +429,14 @@ class GobbletGUI:
         Parameters:
             pos: (x, y) screen pixel coordinates of the click.
         """
+        # If guide modal is open, shield all clicks from board/reserves
+        if self.show_help_modal:
+            if (self.btn_help_close.collidepoint(pos) or
+                self.btn_help_x.collidepoint(pos) or
+                not self.help_modal_rect.collidepoint(pos)):
+                self.show_help_modal = False
+            return
+
         # Check Button Clicks first
         if self.btn_new_game.collidepoint(pos):
             self.reset_game()
@@ -414,6 +444,10 @@ class GobbletGUI:
 
         if self.btn_difficulty.collidepoint(pos):
             self.cycle_difficulty()
+            return
+
+        if self.btn_help.collidepoint(pos):
+            self.show_help_modal = True
             return
 
         # Do not allow board interaction if game is over or AI is thinking
@@ -821,6 +855,8 @@ class GobbletGUI:
         self.draw_reserves()
         self.draw_board()
         self.draw_controls()
+        if self.show_help_modal:
+            self.renderer.draw_help_modal()
 
     def draw_header(self):
         """

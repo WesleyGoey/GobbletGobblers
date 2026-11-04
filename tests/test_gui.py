@@ -20,11 +20,11 @@ class TestGobbletGUI(unittest.TestCase):
         """
         Serves as the test fixture initialization for the GobbletGUI headless test suite.
 
-        Instantiates a `GobbletGUI(width=1320, height=860)` instance operating under the
+        Instantiates a `GobbletGUI(width=1320, height=860, show_guide_on_start=False)` instance operating under the
         SDL dummy video driver, providing full access to screen surfaces, component rects,
         and event queues without requiring a physical monitor.
         """
-        self.gui = GobbletGUI(width=1320, height=860)
+        self.gui = GobbletGUI(width=1320, height=860, show_guide_on_start=False)
 
     def tearDown(self):
         """
@@ -438,6 +438,102 @@ class TestGobbletGUI(unittest.TestCase):
             self.gui.chosen_move_timer = 0  # Force immediate application
             self.gui.process_ai_queue()
         self.assertEqual(self.gui.state.turn_number, 3)
+
+    def test_help_modal_open_close_and_click_shield(self):
+        """
+        Verifies that the 'How to Play' guide modal opens via btn_help or keyboard,
+        captures all clicks to prevent click leakage to the board/reserves,
+        and closes cleanly via btn_help_close or ESC.
+        """
+        self.assertFalse(self.gui.show_help_modal)
+
+        # 1. Open via btn_help click
+        self.gui.handle_mouse_click(self.gui.btn_help.center)
+        self.assertTrue(self.gui.show_help_modal)
+
+        # 2. Click shield: clicking a board cell while modal is open must NOT select or place pieces
+        cell_rect = self.gui.get_cell_rect(2, 2)
+        self.gui.handle_mouse_click(cell_rect.center)
+        self.assertIsNone(self.gui.selected_board_pos)
+        self.assertIsNone(self.gui.selected_reserve_size)
+        self.assertIsNone(self.gui.state.get_top_piece(2, 2))
+
+        # 3. Close via Got It button
+        self.gui.handle_mouse_click(self.gui.btn_help_close.center)
+        self.assertFalse(self.gui.show_help_modal)
+
+        # 4. Keyboard toggle shortcut (H key opens, ESC closes)
+        pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_h))
+        self.gui.handle_events()
+        self.assertTrue(self.gui.show_help_modal)
+
+        pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
+        self.gui.handle_events()
+        self.assertFalse(self.gui.show_help_modal)
+
+    def test_guide_modal_shown_by_default_on_startup(self):
+        """Verifies that GobbletGUI displays the guide modal by default on launch."""
+        default_gui = GobbletGUI()
+        self.assertTrue(default_gui.show_help_modal)
+
+    def test_control_bar_buttons_and_alignment(self):
+        """
+        Verifies that the control bar features exactly 3 equal-rhythm buttons:
+        New Game, AI Difficulty, and How to Play, spanning the exact 480px board width.
+        """
+        btn_w = 152
+        gap = 12
+        total_w = btn_w * 3 + gap * 2
+        self.assertEqual(total_w, 480)
+        self.assertEqual(self.gui.btn_new_game.width, btn_w)
+        self.assertEqual(self.gui.btn_difficulty.width, btn_w)
+        self.assertEqual(self.gui.btn_help.width, btn_w)
+        self.assertEqual(self.gui.btn_new_game.left, self.gui.board_rect.left)
+        self.assertEqual(self.gui.btn_help.right, self.gui.board_rect.right)
+
+    def test_no_bracket_slop_in_ui_configs(self):
+        """
+        Verifies zero square-bracket UI tags in DIFFICULTY_CONFIGS labels
+        and initial/turn status messages.
+        """
+        for diff, cfg in self.gui.DIFFICULTY_CONFIGS.items():
+            self.assertNotIn("[", cfg["label"])
+            self.assertNotIn("]", cfg["label"])
+
+        self.assertNotIn("[", self.gui.status_message)
+        self.assertNotIn("]", self.gui.status_message)
+
+    def test_dynamic_layout_across_viewports(self):
+        """
+        Verifies that compact (760x760), standard (1160x760), and wide (1320x860) viewports
+        render cleanly without rects overflowing screen boundaries.
+        """
+        for w, h in [(760, 760), (1160, 760), (1320, 860)]:
+            gui = GobbletGUI(width=w, height=h)
+            gui.draw()
+
+            self.assertGreaterEqual(gui.board_rect.left, 0)
+            self.assertLessEqual(gui.board_rect.right, w)
+            self.assertGreaterEqual(gui.board_rect.top, 0)
+            self.assertLessEqual(gui.board_rect.bottom, h)
+
+            for btn in (gui.btn_new_game, gui.btn_difficulty, gui.btn_help):
+                self.assertGreaterEqual(btn.left, 0)
+                self.assertLessEqual(btn.right, w)
+                self.assertLessEqual(btn.bottom, h)
+
+            for rect in gui.blue_reserve_rects.values():
+                self.assertGreaterEqual(rect.left, 0)
+                self.assertLessEqual(rect.bottom, h)
+
+            for rect in gui.orange_reserve_rects.values():
+                self.assertLessEqual(rect.right, w)
+                self.assertLessEqual(rect.bottom, h)
+
+            # Test opening modal
+            gui.show_help_modal = True
+            gui.draw()
+            self.assertIsNotNone(gui.screen)
 
 
 if __name__ == '__main__':
