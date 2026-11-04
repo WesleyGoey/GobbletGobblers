@@ -72,7 +72,7 @@ DIFFICULTY_CONFIGS = {
     "easy": {
         "depth": 1,
         "memory_window": 3,
-        "search_budget_ratio": 0.5,
+        "search_budget_ratio": 0.7,
         "time_limit": 0.1,
         "evaluation_noise": 120.0,
         "label": "[DIFFICULTY] EASY",
